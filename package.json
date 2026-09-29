@@ -1,0 +1,8 @@
+{
+  "name": "lootrova",
+  "version": "0.1.0",
+  "description": "Marketplace for digital game items",
+  "main": "server.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": { "start": "node server.js" }
+}
