@@ -7,6 +7,11 @@ const { DatabaseSync } = require('node:sqlite');
 
 const PORT = process.env.PORT || 3000;
 const FEE_RATE = 0.10; // Lootrova keeps 10% of every completed sale
+const MAX_IMAGES = 4;
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'lootrova.db'));
 db.exec(`
@@ -18,6 +23,7 @@ CREATE TABLE IF NOT EXISTS listings (
   id INTEGER PRIMARY KEY, seller_id INTEGER NOT NULL, game TEXT NOT NULL, title TEXT NOT NULL,
   description TEXT NOT NULL, price_cents INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'active', -- active | sold | removed
+  images TEXT NOT NULL DEFAULT '[]',     -- JSON array of /uploads/... paths
   created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL, buyer_id INTEGER NOT NULL, seller_id INTEGER NOT NULL,
@@ -27,6 +33,8 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS ratings (
   order_id INTEGER PRIMARY KEY, seller_id INTEGER NOT NULL, stars INTEGER NOT NULL, comment TEXT);
 `);
+// Databases created before image support lack the images column.
+try { db.exec(`ALTER TABLE listings ADD COLUMN images TEXT NOT NULL DEFAULT '[]'`); } catch {}
 
 function hashPass(pw, salt = crypto.randomBytes(16).toString('hex')) {
   return salt + ':' + crypto.scryptSync(pw, salt, 32).toString('hex');
@@ -52,12 +60,40 @@ const send = (res, code, obj) => {
   res.writeHead(code, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(obj));
 };
-const readBody = (req) => new Promise((resolve) => {
-  let data = '';
-  req.on('data', (c) => { data += c; if (data.length > 1e5) req.destroy(); });
-  req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { resolve({}); } });
+// Resolves to the parsed JSON body, or null when the body exceeds `limit` bytes.
+const readBody = (req, limit = 1e5) => new Promise((resolve) => {
+  const chunks = [];
+  let size = 0;
+  req.on('data', (c) => { size += c.length; if (size <= limit) chunks.push(c); });
+  req.on('end', () => {
+    if (size > limit) return resolve(null);
+    try { resolve(JSON.parse(Buffer.concat(chunks).toString() || '{}')); } catch { resolve({}); }
+  });
 });
 const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const parseImages = (row) => row && { ...row, images: JSON.parse(row.images || '[]') };
+
+// Validates a base64 data URL by its magic bytes and writes it to the uploads folder.
+const SIGNATURES = {
+  jpg: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  png: (b) => b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])),
+  webp: (b) => b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP',
+};
+function saveImage(dataUrl) {
+  const m = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(typeof dataUrl === 'string' ? dataUrl : '');
+  if (!m) return null;
+  const buf = Buffer.from(m[1], 'base64');
+  const ext = Object.keys(SIGNATURES).find((k) => SIGNATURES[k](buf));
+  if (!ext || buf.length > MAX_IMAGE_BYTES) return null;
+  const name = crypto.randomBytes(16).toString('hex') + '.' + ext;
+  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  return '/uploads/' + name;
+}
+
+const LISTING_SELECT = `SELECT l.*, u.username AS seller,
+    (SELECT ROUND(AVG(stars),1) FROM ratings WHERE seller_id = l.seller_id) AS seller_rating,
+    (SELECT COUNT(*) FROM ratings WHERE seller_id = l.seller_id) AS seller_reviews
+  FROM listings l JOIN users u ON u.id = l.seller_id`;
 
 const routes = {
   'POST /api/signup': async (req, res) => {
@@ -88,23 +124,41 @@ const routes = {
 
   'GET /api/listings': (req, res, user, url) => {
     const q = '%' + (url.searchParams.get('q') || '') + '%';
-    const rows = db.prepare(`SELECT l.*, u.username AS seller,
-        (SELECT ROUND(AVG(stars),1) FROM ratings WHERE seller_id = l.seller_id) AS seller_rating
-      FROM listings l JOIN users u ON u.id = l.seller_id
-      WHERE l.status = 'active' AND (l.title LIKE ? OR l.game LIKE ?)
-      ORDER BY l.id DESC LIMIT 100`).all(q, q);
-    send(res, 200, { listings: rows });
+    const game = url.searchParams.get('game') || '';
+    const rows = db.prepare(LISTING_SELECT + ` WHERE l.status = 'active' AND (l.title LIKE ? OR l.game LIKE ?)
+      AND (? = '' OR l.game = ? COLLATE NOCASE) ORDER BY l.id DESC LIMIT 100`).all(q, q, game, game);
+    const games = db.prepare(`SELECT game, COUNT(*) AS count FROM listings WHERE status = 'active'
+      GROUP BY game COLLATE NOCASE ORDER BY count DESC LIMIT 12`).all();
+    const stats = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM listings WHERE status = 'active') AS live,
+      (SELECT COUNT(DISTINCT seller_id) FROM listings) AS sellers,
+      (SELECT COUNT(*) FROM orders WHERE status = 'completed') AS completed`).get();
+    send(res, 200, { listings: rows.map(parseImages), games, stats });
+  },
+  'GET /api/listings/:id': (req, res, user, url, id) => {
+    const l = db.prepare(LISTING_SELECT + ` WHERE l.id = ? AND l.status != 'removed'`).get(id);
+    if (!l) return send(res, 404, { error: 'Item not found' });
+    l.seller_sales = db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE seller_id = ? AND status = 'completed'`).get(l.seller_id).n;
+    send(res, 200, { listing: parseImages(l), fee_rate: FEE_RATE });
   },
   'POST /api/listings': async (req, res, user) => {
     if (!user) return send(res, 401, { error: 'Log in first' });
-    const b = await readBody(req);
+    const b = await readBody(req, (MAX_IMAGE_BYTES * 4 / 3 + 1000) * MAX_IMAGES);
+    if (!b) return send(res, 413, { error: 'Images are too large' });
     const game = str(b.game, 60), title = str(b.title, 100), description = str(b.description, 2000);
     const price = Math.round(Number(b.price) * 100);
     if (!game || !title || !description) return send(res, 400, { error: 'Fill in every field' });
     if (!(price >= 50 && price <= 1000000)) return send(res, 400, { error: 'Price must be between $0.50 and $10,000' });
     if (b.usable !== true) return send(res, 400, { error: 'You must confirm the item is usable' });
-    const r = db.prepare('INSERT INTO listings (seller_id, game, title, description, price_cents) VALUES (?,?,?,?,?)')
-      .run(user.id, game, title, description, price);
+    const raw = Array.isArray(b.images) ? b.images : [];
+    if (raw.length > MAX_IMAGES) return send(res, 400, { error: `Up to ${MAX_IMAGES} images per listing` });
+    const images = raw.map(saveImage);
+    if (images.includes(null)) {
+      images.forEach((p) => p && fs.rmSync(path.join(UPLOAD_DIR, path.basename(p)), { force: true }));
+      return send(res, 400, { error: 'Images must be JPG, PNG or WebP under 3 MB' });
+    }
+    const r = db.prepare('INSERT INTO listings (seller_id, game, title, description, price_cents, images) VALUES (?,?,?,?,?,?)')
+      .run(user.id, game, title, description, price, JSON.stringify(images));
     send(res, 200, { id: r.lastInsertRowid });
   },
   'POST /api/listings/:id/remove': (req, res, user, url, id) => {
@@ -147,38 +201,47 @@ const routes = {
   },
   'GET /api/dashboard': (req, res, user) => {
     if (!user) return send(res, 401, { error: 'Log in first' });
-    const q = `SELECT o.*, l.title, l.game, b.username AS buyer, s.username AS seller FROM orders o
+    const q = `SELECT o.*, l.title, l.game, l.images, b.username AS buyer, s.username AS seller FROM orders o
       JOIN listings l ON l.id=o.listing_id JOIN users b ON b.id=o.buyer_id JOIN users s ON s.id=o.seller_id`;
     send(res, 200, {
       user,
-      listings: db.prepare(`SELECT * FROM listings WHERE seller_id=? AND status='active' ORDER BY id DESC`).all(user.id),
-      purchases: db.prepare(q + ' WHERE o.buyer_id=? ORDER BY o.id DESC').all(user.id),
-      sales: db.prepare(q + ' WHERE o.seller_id=? ORDER BY o.id DESC').all(user.id),
+      listings: db.prepare(`SELECT * FROM listings WHERE seller_id=? AND status='active' ORDER BY id DESC`).all(user.id).map(parseImages),
+      purchases: db.prepare(q + ' WHERE o.buyer_id=? ORDER BY o.id DESC').all(user.id).map(parseImages),
+      sales: db.prepare(q + ' WHERE o.seller_id=? ORDER BY o.id DESC').all(user.id).map(parseImages),
     });
   },
 };
 
-const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
+const MIME = {
+  '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp',
+};
+
+function serveFile(res, file, fallback) {
+  fs.readFile(file, (err, data) => {
+    if (err) return fallback ? serveFile(res, fallback) : send(res, 404, { error: 'Not found' });
+    const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' };
+    if (file.startsWith(UPLOAD_DIR)) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    res.writeHead(200, headers);
+    res.end(data);
+  });
+}
 
 const server = http.createServer(async (req, res) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   const url = new URL(req.url, 'http://x');
   if (url.pathname.startsWith('/api/')) {
-    const idMatch = /^(\/api\/\w+\/)(\d+)(\/\w+)$/.exec(url.pathname);
-    const key = req.method + ' ' + (idMatch ? idMatch[1] + ':id' + idMatch[3] : url.pathname);
+    const idMatch = /^(\/api\/\w+\/)(\d+)(\/\w+)?$/.exec(url.pathname);
+    const key = req.method + ' ' + (idMatch ? idMatch[1] + ':id' + (idMatch[3] || '') : url.pathname);
     const handler = routes[key];
     if (!handler) return send(res, 404, { error: 'Not found' });
     try { return await handler(req, res, currentUser(req), url, idMatch && Number(idMatch[2])); }
     catch (e) { console.error(e); return send(res, 500, { error: 'Server error' }); }
   }
-  const file = path.join(__dirname, 'public', url.pathname === '/' ? 'index.html' : path.normalize(url.pathname));
-  if (!file.startsWith(path.join(__dirname, 'public'))) return send(res, 403, { error: 'Forbidden' });
-  fs.readFile(file, (err, data) => {
-    if (err) return fs.readFile(path.join(__dirname, 'public', 'index.html'), (_, d) => {
-      res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(d);
-    });
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
-    res.end(data);
-  });
+  if (url.pathname.startsWith('/uploads/')) return serveFile(res, path.join(UPLOAD_DIR, path.basename(url.pathname)));
+  const file = path.join(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : path.normalize(url.pathname));
+  if (!file.startsWith(PUBLIC_DIR)) return send(res, 403, { error: 'Forbidden' });
+  serveFile(res, file, path.join(PUBLIC_DIR, 'index.html'));
 });
 
 if (require.main === module) server.listen(PORT, () => console.log(`Lootrova running on http://localhost:${PORT}`));

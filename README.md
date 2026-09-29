@@ -3,7 +3,8 @@
 Marketplace for digital game items. Anyone can sell; Lootrova keeps a **10% fee** on every completed sale.
 
 ## How it works
-- Sellers list items and must confirm each one is usable.
+- Sellers list items with up to 4 images (JPG, PNG or WebP) and must confirm each one is usable.
+- Images are resized in the browser, checked on the server, and stored in `uploads/`.
 - When a buyer purchases, the money is **held** until the buyer clicks "It works" (and rates the seller).
 - The seller is then credited the price minus 10%. The buyer can instead mark "Doesn't work", which opens a dispute.
 - Payments are not connected yet: balances are tracked in the database only.

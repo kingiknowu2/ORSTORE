@@ -3,16 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lootrova — Game Item Marketplace</title>
+<meta name="theme-color" content="#07080d">
+<title>Lootrova — The Premium Game Item Marketplace</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header>
-  <a href="#/" class="logo">Loot<span>rova</span></a>
-  <nav id="nav"></nav>
+<div class="bg" aria-hidden="true">
+  <div class="orb orb-a"></div><div class="orb orb-b"></div><div class="orb orb-c"></div>
+  <div class="grid-overlay"></div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a href="#/" class="logo" aria-label="Lootrova home">
+      <img src="/logo.svg" alt="" width="30" height="30">
+      <span>Loot<b>rova</b></span>
+    </a>
+    <nav id="nav"></nav>
+  </div>
 </header>
+
 <main id="app"></main>
-<footer>Lootrova takes a 10% fee on completed sales. Only usable items may be listed. Money is held until the buyer confirms the item works.</footer>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="logo small"><img src="/logo.svg" alt="" width="20" height="20"><span>Loot<b>rova</b></span></div>
+    <p>Only usable items are allowed. Payment is held until the buyer confirms the item works. Lootrova keeps a 10% fee on completed sales.</p>
+  </div>
+</footer>
+
+<div id="toasts" aria-live="polite"></div>
+<div id="modal-root"></div>
 <script src="/app.js"></script>
 </body>
 </html>
