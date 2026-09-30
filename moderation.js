@@ -3,6 +3,7 @@
 //  - reviewCase: a transparent points-based scorer that summarises which side the evidence favours.
 // Both are advisory. Unsafe images are hidden automatically; case outcomes are always decided by the site owner.
 const jpeg = require('jpeg-js');
+const { readChat } = require('./chat-understanding');
 const { PNG } = require('pngjs');
 
 const enabled = () => process.env.NSFW_DISABLED !== '1';
@@ -66,7 +67,6 @@ async function checkImage(buffer, mediaType) {
 
 // ---------- Case scorer ----------
 // Positive points favour the seller, negative points favour the buyer. Every factor is listed in the summary.
-const POSITIVE_CHAT = /\b(received|got it|got them|thanks|thank you|works|all good|legit)\b/i;
 async function reviewCase(c) {
   const factors = [];
   const add = (pts, text) => { factors.push({ pts, text }); };
@@ -84,9 +84,15 @@ async function reviewCase(c) {
   const sellerExtra = c.evidence.filter((e) => e.by === 'seller' && e !== recording).length;
   if (buyerFiles) add(-Math.min(2, buyerFiles), `Buyer added ${buyerFiles} evidence file${buyerFiles === 1 ? '' : 's'}`);
   if (sellerExtra) add(Math.min(2, sellerExtra), `Seller added ${sellerExtra} more piece${sellerExtra === 1 ? '' : 's'} of evidence`);
-  const buyerMsgs = c.messages.filter((m) => m.from === 'buyer');
-  if (buyerMsgs.some((m) => POSITIVE_CHAT.test(m.text))) add(2, 'Buyer said in chat that they received it');
-  if (!c.messages.some((m) => m.from === 'seller')) add(-1, 'Seller never replied in the order chat');
+  // Chat is read for meaning, including slang, typos, emojis and negation ("didnt get it", "tysm got em").
+  const chat = readChat(c.messages);
+  const q = chat.buyer_quote ? ` (“${chat.buyer_quote.slice(0, 60)}”)` : '';
+  if (chat.buyer_says === 'received') add(chat.buyer_changed_mind ? 1 : 3, `Buyer said in chat they received it${q}`);
+  if (chat.buyer_says === 'not_received') add(-2, `Buyer said in chat they didn’t get it${q}`);
+  if (chat.buyer_says === 'scam_claim') add(-1, `Buyer accused the seller of scamming or asked for a refund${q}`);
+  if (chat.buyer_changed_mind) add(0, 'Buyer changed their story in chat; a moderator should read it');
+  if (chat.seller_claims_delivery && !recording) add(0, 'Seller said in chat they sent it, but there’s no recording to prove it');
+  if (!chat.seller_replied) add(-1, 'Seller never replied in the order chat');
   const s = c.seller_stats || {};
   if (s.completed >= 10 && s.dispute_rate < 0.05) add(1, `Seller has ${s.completed} completed sales with few disputes`);
   if (s.completed >= 5 && s.dispute_rate > 0.2) add(-1, `Seller has a high dispute rate (${Math.round(s.dispute_rate * 100)}%)`);
