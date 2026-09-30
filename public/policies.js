@@ -47,7 +47,6 @@ window.POLICIES = {
 <h2>Who we share it with</h2>
 <ul><li>The seller of a product you buy can see your username and the order details.</li>
 <li>Our payment provider processes card payments.</li>
-<li>Product pages load fonts from Google Fonts, which receives your IP address when it serves them.</li>
 <li>We don’t sell your personal data.</li></ul>
 <h2>How long we keep it</h2>
 <p>We keep transaction records for as long as the law requires (usually six years). Account data is kept while your account is open. Support messages and reports are kept for as long as they are needed to resolve the issue.</p>
@@ -66,7 +65,7 @@ window.POLICIES = {
 <h2>Other storage</h2>
 <p>Your browser may remember the email you last used at checkout so you don’t have to type it again. This stays on your device and you can clear it at any time in your browser settings.</p>
 <h2>Third parties</h2>
-<p>Fonts are loaded from Google Fonts. Google may receive your IP address, but no Lootrova cookies are shared with them.</p>`,
+<p>Lootrova hosts its own fonts and doesn’t load content from third-party trackers.</p>`,
   },
   'seller-terms': {
     title: 'Seller Terms',
