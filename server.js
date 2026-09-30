@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at TEXT NOT NULL, resolved_at TEXT, resolved_by INTEGER, resolution_note TEXT);
 CREATE TABLE IF NOT EXISTS order_messages (
   id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, sender_id INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id INTEGER NOT NULL, followee_id INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (follower_id, followee_id));
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT NOT NULL, email TEXT NOT NULL, subject TEXT NOT NULL,
   message TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -677,6 +679,38 @@ const routes = {
     if (!body) return send(res, 400, { error: 'Type a message first.' });
     db.prepare('INSERT INTO order_messages (order_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').run(o.id, user.id, body, nowIso());
     send(res, 200, { ok: true });
+  },
+  // Member profiles and following.
+  'GET /api/profile': (req, res, user, url) => {
+    const u = db.prepare('SELECT id, username, status, created_at FROM users WHERE username = ? COLLATE NOCASE').get(str(url.searchParams.get('u'), 30));
+    if (!u || (u.status !== 'active' && user?.role !== 'admin')) return send(res, 404, { error: 'Member not found.' });
+    const count = (sql) => db.prepare(sql).get(u.id).n;
+    send(res, 200, {
+      profile: {
+        username: u.username, joined: u.created_at, is_me: user?.id === u.id,
+        followers: count('SELECT COUNT(*) AS n FROM follows WHERE followee_id = ?'),
+        following: count('SELECT COUNT(*) AS n FROM follows WHERE follower_id = ?'),
+        is_following: !!(user && db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?').get(user.id, u.id)),
+        sales: count(`SELECT COUNT(*) AS n FROM orders WHERE seller_id = ? AND status IN ('paid', 'completed', 'disputed')`),
+        rating: db.prepare('SELECT ROUND(AVG(stars),1) AS r, COUNT(*) AS n FROM ratings WHERE seller_id = ?').get(u.id),
+      },
+      listings: db.prepare(LISTING_SELECT + ` WHERE l.seller_id = ? AND l.status = 'active' AND l.file_id IS NOT NULL ORDER BY l.id DESC`).all(u.id).map(parseImages),
+    });
+  },
+  'POST /api/follow': async (req, res, user) => {
+    requireUser(user);
+    const b = await readBody(req);
+    const t = db.prepare(`SELECT id FROM users WHERE username = ? COLLATE NOCASE AND status = 'active'`).get(str(b.username, 30));
+    if (!t) return send(res, 404, { error: 'Member not found.' });
+    if (t.id === user.id) return send(res, 400, { error: 'You can’t follow yourself.' });
+    if (b.follow === false) db.prepare('DELETE FROM follows WHERE follower_id = ? AND followee_id = ?').run(user.id, t.id);
+    else db.prepare('INSERT OR IGNORE INTO follows (follower_id, followee_id, created_at) VALUES (?, ?, ?)').run(user.id, t.id, nowIso());
+    send(res, 200, { following: b.follow !== false, followers: db.prepare('SELECT COUNT(*) AS n FROM follows WHERE followee_id = ?').get(t.id).n });
+  },
+  'GET /api/feed': (req, res, user) => {
+    requireUser(user);
+    send(res, 200, { listings: db.prepare(LISTING_SELECT + ` JOIN follows f ON f.followee_id = l.seller_id AND f.follower_id = ?
+      WHERE l.status = 'active' AND u.status = 'active' AND l.file_id IS NOT NULL ORDER BY l.id DESC LIMIT 24`).all(user.id).map(parseImages) });
   },
   'GET /api/dashboard': (req, res, user) => {
     requireUser(user);

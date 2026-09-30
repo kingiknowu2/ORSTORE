@@ -634,3 +634,11 @@ body { background: #0f1115 !important; }
 .msg p { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .chat-form { display: flex; gap: 10px; }
 .chat-form input { flex: 1; }
+
+/* Profiles */
+.profile { display: flex; align-items: center; gap: 24px; padding: 28px; margin-top: 36px; flex-wrap: wrap; }
+.avatar.xl { width: 96px; height: 96px; font-size: 2.4rem; }
+.p-main { flex: 1; min-width: 220px; }
+.p-main h1 { font-size: 2rem; }
+.p-stats { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px; color: var(--muted); }
+.p-stats b { color: #fff; }

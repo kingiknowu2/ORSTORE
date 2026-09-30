@@ -423,3 +423,22 @@ test('order chat and required buyer info (e.g. in-game username)', async () => {
   const unpaid = await (await user('chat_unpaid')).post('/api/checkout', { listing_id: id, email: 'u@example.com', consent: true, buyer_info: 'x' });
   assert.equal(unpaid.status, 200);
 });
+
+test('members can follow each other and see a feed', async () => {
+  const s = await user('follow_seller');
+  const f = await user('follow_fan');
+  const id = await listItem(s, { title: 'Followed Item' });
+  assert.equal((await f.post('/api/follow', { username: 'follow_fan' })).status, 400, 'no self-follow');
+  const r = await f.post('/api/follow', { username: 'follow_seller' });
+  assert.deepEqual(r.data, { following: true, followers: 1 });
+  await f.post('/api/follow', { username: 'follow_seller' });
+  const prof = (await f.get('/api/profile?u=follow_seller')).data;
+  assert.equal(prof.profile.followers, 1, 'following twice counts once');
+  assert.equal(prof.profile.is_following, true);
+  assert.ok(prof.listings.some((l) => l.id === id));
+  assert.ok((await f.get('/api/feed')).data.listings.some((l) => l.id === id));
+  assert.equal((await f.post('/api/follow', { username: 'follow_seller', follow: false })).data.followers, 0);
+  assert.equal((await f.get('/api/feed')).data.listings.length, 0);
+  assert.equal((await client().post('/api/follow', { username: 'follow_seller' })).status, 401);
+  assert.equal((await f.get('/api/profile?u=nobody_here')).status, 404);
+});

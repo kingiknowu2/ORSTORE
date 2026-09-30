@@ -258,6 +258,7 @@ function home() {
       </div>
       <div class="hero-art" id="hero-art" aria-hidden="true"></div>
     </section>
+    <div id="feed"></div>
     <div class="section-head"><div><span class="eyebrow">Browse by game</span><h2>Popular games</h2></div></div>
     <div class="game-tiles" id="game-tiles"></div>
     <div class="section-head"><div><span class="eyebrow">Marketplace</span><h2 id="results-title">Latest drops</h2></div>
@@ -281,6 +282,10 @@ function home() {
   };
   form.onsubmit = (e) => { e.preventDefault(); clearTimeout(timer); apply(); };
   form.q.oninput = () => { clearTimeout(timer); timer = setTimeout(apply, 300); };
+  if (me) api('/feed').then(({ listings }) => {
+    if (listings.length && $('#feed')) $('#feed').innerHTML = `<div class="section-head"><div><span class="eyebrow">Following</span><h2>From sellers you follow</h2></div></div>
+      <div class="grid">${listings.slice(0, 8).map(card).join('')}</div>`;
+  }).catch(() => {});
   return loadResults(true);
 }
 
@@ -361,7 +366,7 @@ async function itemPage(id) {
       <div class="info glass reveal" style="--i:1">
         <span class="eyebrow">${esc(l.game)}</span>
         <h1>${esc(l.title)}</h1>
-        <div class="sold-by">${avatar(l.seller)}<span>Sold by <b>${esc(l.seller)}</b></span>${rating(l.seller_rating, l.seller_reviews)}</div>
+        <div class="sold-by">${avatar(l.seller)}<span>Sold by <a href="#/u/${encodeURIComponent(l.seller)}" style="color:#fff;font-weight:700">${esc(l.seller)}</a></span>${rating(l.seller_rating, l.seller_reviews)}</div>
         <div class="price">${money(l.price_cents)}</div>
         <p class="price-note">Final price. No extra fees at checkout.</p>
         ${cta}
@@ -369,7 +374,7 @@ async function itemPage(id) {
         <div class="receive"><h3>What you receive</h3><p>${esc(l.delivers || 'See description')}</p>${specsList(l)}</div>
         <div class="desc-wrap"><div class="block-title">Description</div><p class="desc">${esc(l.description)}</p></div>
         <div class="seller-card">${avatar(l.seller, 'lg')}
-          <div style="flex:1"><b>${esc(l.seller)}</b><small class="muted">${l.seller_sales} sale${l.seller_sales === 1 ? '' : 's'} on Lootrova</small></div>
+          <div style="flex:1"><a href="#/u/${encodeURIComponent(l.seller)}" style="color:#fff;font-weight:700;text-decoration:none">${esc(l.seller)}</a><small class="muted">${l.seller_sales} sale${l.seller_sales === 1 ? '' : 's'} on Lootrova</small></div>
           ${rating(l.seller_rating, l.seller_reviews) || '<small class="muted">New seller</small>'}</div>
         <div class="market-note"><span>Listed by an independent seller. Lootrova takes a ${feePct()} fee from each sale.</span>
           ${l.is_owner ? '' : `<button class="link-btn" id="report">${icon.flag} Report product</button>`}</div>
@@ -568,6 +573,31 @@ function statusLabel(s, who) {
     disputed: 'Refund requested', refunded: 'Refunded', chargeback: 'Charged back', cancelled: 'Cancelled',
     requested: 'Processing', failed: 'Failed', active: 'Active', sold: 'Sold out', removed: 'Removed',
   })[s] || s;
+}
+
+// ---------- Profiles ----------
+async function profilePage(name) {
+  const { profile: p, listings } = await api('/profile?u=' + encodeURIComponent(name));
+  document.title = `${p.username} — Lootrova`;
+  app.innerHTML = `<div class="profile glass reveal">${avatar(p.username, 'xl')}
+      <div class="p-main"><h1>${esc(p.username)}</h1><small class="muted">Member since ${fmtDate(p.joined)}</small>
+        <div class="p-stats"><span><b id="fcount">${p.followers}</b> follower${p.followers === 1 ? '' : 's'}</span><span><b>${p.following}</b> following</span>
+          <span><b>${p.sales}</b> sales</span><span>${p.rating.r ? `<b class="rating">★ ${p.rating.r}</b> (${p.rating.n})` : 'No ratings yet'}</span></div></div>
+      ${p.is_me ? '<a class="btn ghost" href="#/dashboard">Your dashboard</a>' : `<button class="btn ${p.is_following ? 'ghost' : ''}" id="follow">${p.is_following ? 'Following ✓' : '+ Follow'}</button>`}
+    </div>
+    <div class="section-head"><div><span class="eyebrow">Shop</span><h2>${listings.length} item${listings.length === 1 ? '' : 's'} for sale</h2></div></div>
+    <div class="grid">${listings.map(card).join('') || '<p class="muted">Nothing for sale right now.</p>'}</div>`;
+  const b = $('#follow');
+  if (b) b.onclick = async () => {
+    if (!me) return needLogin('Log in to follow members');
+    const want = !b.textContent.startsWith('Following');
+    try {
+      const r = await busy(b, () => api('/follow', { username: p.username, follow: want }));
+      $('#fcount').textContent = r.followers;
+      toast(want ? `Following ${p.username}. Their new items show on your homepage.` : `Unfollowed ${p.username}`);
+      setTimeout(() => { b.textContent = want ? 'Following ✓' : '+ Follow'; b.classList.toggle('ghost', want); }, 0);
+    } catch (err) { toast(err.message, 'err'); }
+  };
 }
 
 // ---------- Order chat ----------
@@ -855,7 +885,7 @@ async function dashboard() {
 
   app.innerHTML = `
     <div class="dash-head"><div><span class="eyebrow">Dashboard</span><h1>Hey, ${esc(me.username)}</h1></div>
-      <a class="btn" href="#/sell">${icon.plus} New listing</a></div>
+      <span style="display:flex;gap:10px"><a class="btn ghost" href="#/u/${encodeURIComponent(me.username)}">My profile</a><a class="btn" href="#/sell">${icon.plus} New listing</a></span></div>
     ${me.status !== 'active' ? '<div class="notice bad">Your seller account is suspended. You can still download your purchases, but you can’t list items or request payouts. <a href="#/contact" style="color:inherit">Contact support</a>.</div>' : ''}
     ${isSeller ? `<div class="tiles">
       <div class="tile glass hl reveal"><div class="label">${icon.wallet} Available balance</div><div class="value">${money(d.balances.available_cents)}</div><div class="sub">Ready to pay out</div></div>
@@ -1149,6 +1179,7 @@ async function route() {
     else if (view === 'order') await orderPage(Number(id));
     else if (view === 'receipt') await receiptPage(Number(id));
     else if (view === 'chat') await chatPage(Number(id));
+    else if (view === 'u') await profilePage(decodeURIComponent(id || ''));
     else if (view === 'admin') await adminPage();
     else if (view === 'policy') policyPage(id);
     else if (view === 'contact') contactPage();
