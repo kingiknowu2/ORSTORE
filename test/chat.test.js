@@ -54,3 +54,25 @@ test('tricky phrasings', () => {
     ['got it didnt expect it so fast ty', 'received'], ['hmm ok', 'neutral'], ['i got scammed smh', 'scam_claim']];
   assert.deepEqual(cases.filter(([m, want]) => classifyMessage(m, 'buyer').intent !== want).map(([m]) => m), []);
 });
+
+test('case model learns the owner’s habits once there are 10 decisions', () => {
+  const { learnFromOwner } = require('../moderation');
+  const mk = (features, label) => ({ features, label });
+  assert.equal(learnFromOwner([mk({ recording: 1 }, 'pay_seller')], { recording: 1 }), null, 'needs 10 decisions first');
+  const history = [
+    ...Array(6).fill(mk({ recording: 1, chat_received: 1 }, 'pay_seller')),
+    ...Array(6).fill(mk({ no_recording: 1, chat_not_received: 1 }, 'refund_buyer')),
+  ];
+  const likeSeller = learnFromOwner(history, { recording: 1, chat_received: 1 });
+  const likeBuyer = learnFromOwner(history, { no_recording: 1, chat_not_received: 1 });
+  assert.equal(likeSeller.decisions, 12);
+  assert.ok(likeSeller.p_seller > 0.8, JSON.stringify(likeSeller));
+  assert.ok(likeBuyer.p_seller < 0.2, JSON.stringify(likeBuyer));
+});
+
+test('our chat model handles messages it never trained on', () => {
+  const { predict } = require('../chat-model');
+  const { HELD_OUT } = require('../ml/chat-heldout');
+  const right = HELD_OUT.filter((h) => predict(h.text, h.from).label === h.label).length;
+  assert.ok(right / HELD_OUT.length >= 0.9, `${right}/${HELD_OUT.length}`);
+});

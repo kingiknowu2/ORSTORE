@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   period_start TEXT, period_end TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS macro_keys (user_id INTEGER PRIMARY KEY, key_hash TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS macro_usage (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, order_id INTEGER NOT NULL, created_at TEXT NOT NULL, UNIQUE (user_id, order_id));
+CREATE TABLE IF NOT EXISTS case_decisions (case_id INTEGER PRIMARY KEY, features TEXT NOT NULL, label TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT NOT NULL, email TEXT NOT NULL, subject TEXT NOT NULL,
   message TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -326,6 +327,7 @@ function caseData(caseId) {
         (SELECT COUNT(*) FROM cases c JOIN orders x ON x.id = c.order_id WHERE x.seller_id = ?) AS cases FROM orders WHERE seller_id = ?`).get(o.seller_id, o.seller_id);
       return { completed: r.completed || 0, dispute_rate: r.total ? (r.cases || 0) / r.total : 0 };
     })(),
+    training: db.prepare('SELECT features, label FROM case_decisions ORDER BY case_id DESC LIMIT 500').all().map((r) => ({ label: r.label, features: JSON.parse(r.features) })),
     buyer_stats: { cases_90d: db.prepare(`SELECT COUNT(*) AS n FROM cases c JOIN orders x ON x.id = c.order_id WHERE x.buyer_id = ? AND c.opened_by = 'buyer' AND c.created_at > ?`)
       .get(o.buyer_id, new Date(Date.now() - 90 * 86400000).toISOString()).n },
     messages: db.prepare('SELECT sender_id, body, created_at FROM order_messages WHERE order_id = ? ORDER BY id').all(o.id).map((m) => ({ from: who(m.sender_id), at: m.created_at, text: m.body })),
@@ -344,7 +346,7 @@ async function runAiReview(caseId) {
   const v = await ai.reviewCase(caseData(caseId));
   db.prepare(`UPDATE cases SET ai_recommendation = ?, ai_confidence = ?, ai_summary = ?, ai_details = ?, ai_reviewed_at = ?,
     status = CASE WHEN status = 'reviewing' THEN 'open' ELSE status END WHERE id = ?`)
-    .run(v.recommendation, v.confidence, v.summary, JSON.stringify({ key_evidence: v.key_evidence, missing_evidence: v.missing_evidence }), nowIso(), caseId);
+    .run(v.recommendation, v.confidence, v.summary, JSON.stringify({ key_evidence: v.key_evidence, missing_evidence: v.missing_evidence, features: v.features, learned: v.learned }), nowIso(), caseId);
   return true;
 }
 // ---------- NSFW image screening ----------
@@ -960,6 +962,11 @@ const routes = {
     if (b.decision === 'refund_buyer') reverseOrder(o, 'refund', 'Refunded after case review');
     else if (b.decision === 'pay_seller') { db.prepare(`UPDATE orders SET status = 'paid' WHERE id = ? AND status = 'disputed'`).run(o.id); releaseOrder(o.id); }
     else return send(res, 400, { error: 'Choose refund_buyer or pay_seller.' });
+    // Remember the owner's decision so the case model can learn from it.
+    try {
+      const v = await ai.reviewCase(caseData(id));
+      db.prepare('INSERT OR REPLACE INTO case_decisions (case_id, features, label, created_at) VALUES (?, ?, ?, ?)').run(id, JSON.stringify(v.features), b.decision, nowIso());
+    } catch (e) { console.error('Could not record decision', e.message); }
     db.prepare(`UPDATE cases SET status = 'resolved', resolution = ?, resolved_at = ? WHERE id = ?`)
       .run((b.decision === 'refund_buyer' ? 'Buyer refunded' : 'Seller paid') + (str(b.note, 500) ? ': ' + str(b.note, 500) : ''), nowIso(), id);
     send(res, 200, { ok: true });

@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "train": "node ml/train-chat.js"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",

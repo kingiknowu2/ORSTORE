@@ -88,3 +88,9 @@ The repo includes `render.yaml` for [Render](https://render.com) (free plan):
 3. Deploy. Render gives you a public link like `https://lootrova.onrender.com`.
 
 `DEMO_SEED=1` fills an empty site with sample listings and orders (demo logins: `NovaTrades`, `PixelForge`, `kai_buys`, `zoe_plays`, password `demo-password`). Remove it before real launch. On the free plan the site sleeps when unused (first visit takes ~1 minute) and the database resets on each redeploy.
+
+## Our own AI models
+- **Chat model** (`chat-model.js`, weights in `ml/chat-model.json`, about 1 MB): a small neural network we trained ourselves on thousands of example gamer messages (slang, typos, emojis, negation). It tells whether a buyer says they received the item, didn't, or claims a scam, and whether a seller says they sent it. It runs in plain JavaScript on the server in well under a millisecond. Messages it isn't confident about count as unclear.
+  - Retrain after changing `ml/chat-data.js`: `npm run train`. It prints its accuracy on `ml/chat-heldout.js`, messages it never trained on.
+  - To teach it from real mistakes, add `{ "text": "...", "from": "buyer", "label": "not_received" }` entries to `ml/corrections.json` and retrain.
+- **Decision model** (`learnFromOwner` in `moderation.js`): every time you resolve a case, its evidence factors and your decision are saved. From 10 decisions on, a small model trained on them adds "similar cases went to the seller/buyer X% of the time" to each case summary. It's advice only; you still decide.
