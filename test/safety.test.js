@@ -10,12 +10,15 @@ const PORT = 4500 + Math.floor(Math.random() * 400);
 const BASE = `http://localhost:${PORT}`;
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'lootrova-safety-'));
 let server;
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
-const dataUrl = (marker) => 'data:image/png;base64,' + Buffer.concat([PNG, Buffer.from(marker)]).toString('base64');
+const { PNG: PngJs } = require('pngjs');
+// Solid-colour test images: magenta = explicit, yellow = borderline, grey = normal (see stub-nsfw.js).
+function solid(r, g, b) { const p = new PngJs({ width: 96, height: 96 }); for (let i = 0; i < p.data.length; i += 4) p.data.set([r, g, b, 255], i); return PngJs.sync.write(p); }
+const IMG = { fine: solid(120, 120, 120), NSFWTEST: solid(255, 0, 255), UNSURETEST: solid(255, 255, 0) };
+const dataUrl = (marker) => 'data:image/png;base64,' + IMG[marker].toString('base64');
 
 before(async () => {
-  server = spawn(process.execPath, ['--require', path.join(__dirname, 'stub-anthropic.js'), path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT, DB_PATH: path.join(TMP, 'db'), UPLOAD_DIR: path.join(TMP, 'up'), FILES_DIR: path.join(TMP, 'f'), ADMIN_USERS: 'boss', AI_REVIEW: '1' },
+  server = spawn(process.execPath, ['--require', path.join(__dirname, 'stub-nsfw.js'), path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, PORT, DB_PATH: path.join(TMP, 'db'), UPLOAD_DIR: path.join(TMP, 'up'), FILES_DIR: path.join(TMP, 'f'), ADMIN_USERS: 'boss' },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   for (let i = 0; i < 50; i++) { try { await fetch(BASE + '/api/config'); return; } catch { await new Promise((r) => setTimeout(r, 100)); } }
@@ -70,7 +73,7 @@ test('listing images are screened: unsafe removed, unsure held, safe shown', asy
   assert.equal((await guest.get(`/api/listings/${unsure}`)).status, 200, 'approved by the owner');
 });
 
-test('case screenshots are screened and the AI only gives advice', async () => {
+test('case screenshots are screened and the evidence score is advice only', async () => {
   const s = await mk('case_s');
   const b = await mk('case_b');
   const id = await list(s, [], 'Plain');
@@ -79,13 +82,14 @@ test('case screenshots are screened and the AI only gives advice', async () => {
   const oid = co.data.order.id;
   await b.post(`/api/orders/${oid}/sync`);
   assert.equal((await b.post(`/api/orders/${oid}/refund-request`, { reason: 'Never received the item in game.' })).status, 200);
-  const bad = await b.upload('x.png', Buffer.concat([PNG, Buffer.from('NSFWTEST')]));
+  const bad = await b.upload('x.png', IMG.NSFWTEST);
   await until(async () => true);
   await b.post(`/api/orders/${oid}/evidence`, { note: 'see pic', file_id: bad.data.id });
   const c = await until(async () => { const r = (await b.get(`/api/orders/${oid}/case`)).data.case; return r.ai && r.evidence[0].file.safety === 'unsafe' && r; });
   assert.equal(c.evidence[0].file.safety, 'unsafe');
   assert.equal((await s.get(c.evidence[0].file.url)).status, 403, 'unsafe evidence hidden from the parties');
-  assert.equal(c.ai.recommendation, 'needs_human');
-  assert.equal(c.status, 'open', 'AI never resolves the case');
-  assert.equal((await b.get(`/api/orders/${oid}`)).data.order.status, 'disputed', 'order untouched by AI');
+  assert.equal(c.ai.recommendation, 'refund_buyer', 'no recording and no seller reply favours the buyer');
+  assert.match(c.ai.summary, /No trade recording from the seller \(-3\)/);
+  assert.equal(c.status, 'open', 'the score never resolves the case');
+  assert.equal((await b.get(`/api/orders/${oid}`)).data.order.status, 'disputed', 'order untouched until the owner decides');
 });

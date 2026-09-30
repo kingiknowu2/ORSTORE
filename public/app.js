@@ -715,9 +715,9 @@ async function orderPanel(id) {
     ${c ? `<div class="casebox"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h3>Case #${c.id}</h3>
         <span class="status ${c.status === 'resolved' ? 'completed' : 'disputed'}">${c.status === 'resolved' ? 'Resolved' : 'Under review'}</span></div>
       <p class="muted" style="margin:4px 0 10px">${esc(c.reason)}</p>
-      ${c.ai ? `<div class="ai"><b>AI summary</b> <span class="muted">· evidence leans towards: ${esc({ pay_seller: 'the seller', refund_buyer: 'the buyer', needs_human: 'unclear' }[c.ai.recommendation])} (${esc(c.ai.confidence)} confidence). The AI never decides; the site owner does.</span><p>${esc(c.ai.summary)}</p>
+      ${c.ai ? `<div class="ai"><b>Evidence summary</b> <span class="muted">· evidence leans towards: ${esc({ pay_seller: 'the seller', refund_buyer: 'the buyer', needs_human: 'unclear' }[c.ai.recommendation])} (${esc(c.ai.confidence)} confidence). This is automatic advice; the site owner decides.</span><p>${esc(c.ai.summary)}</p>
         ${c.ai.missing_evidence?.length ? `<small class="muted">Would help: ${c.ai.missing_evidence.map(esc).join(' · ')}</small>` : ''}</div>`
-        : `<div class="ai"><b>AI evidence review</b><p class="muted">${c.ai_enabled ? 'Reviewing the evidence…' : 'Waiting for review. Add your evidence below.'}</p></div>`}
+        : `<div class="ai"><b>Evidence summary</b><p class="muted">Scoring the evidence…</p></div>`}
       ${c.resolution ? `<div class="notice ok">Decision: ${esc(c.resolution)}</div>` : ''}
       <div class="evlist">${c.evidence.map((e) => `<div class="ev"><b>${esc(e.by)}</b> <small class="muted">${fmtDateTime(e.at)}</small>
         ${e.note ? `<p>${esc(e.note)}</p>` : ''}${e.file ? (['unsafe', 'unsure'].includes(e.file.safety) ? `<span class="muted">${icon.image} ${esc(e.file.name)} · hidden by safety check</span>` : e.file.safety === 'pending' ? `<span class="muted">${icon.image} ${esc(e.file.name)} · safety check in progress…</span>` : `<a href="${e.file.url}" target="_blank" rel="noopener">${icon.image} ${esc(e.file.name)}</a>`) : ''}</div>`).join('') || '<p class="muted">No evidence yet.</p>'}</div>
@@ -844,8 +844,8 @@ async function resizeImage(file, max = 1600) {
   c.width = Math.round(bmp.width * scale);
   c.height = Math.round(bmp.height * scale);
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-  const webp = c.toDataURL('image/webp', 0.85);
-  return webp.startsWith('data:image/webp') ? webp : c.toDataURL('image/jpeg', 0.85);
+  // JPEG so the server's image safety check can read it.
+  return c.toDataURL('image/jpeg', 0.88);
 }
 function uploadProductFile(file, onProgress) {
   return new Promise((resolve, reject) => {
@@ -1232,7 +1232,7 @@ async function adminPage() {
         <small>Requested ${fmtDateTime(p.created_at)}${p.reference ? ' · Ref ' + esc(p.reference) : ''}</small></div>
       <div class="side"><span class="status ${p.status === 'paid' ? 'completed' : p.status}">${statusLabel(p.status)}</span>
         ${p.status === 'requested' ? `<button class="btn success sm" data-paid="${p.id}">Mark paid</button><button class="btn ghost sm" data-failed="${p.id}">Mark failed</button>` : ''}</div></div>`).join('') || '<p class="muted">No payout requests.</p>',
-    images: () => (d.images.ai_enabled ? '' : '<div class="notice">Image safety checks are off. Set ANTHROPIC_API_KEY on the server to screen every uploaded image.</div>')
+    images: () => (d.images.ai_enabled ? '' : '<div class="notice">Image safety checks are off (NSFW_DISABLED=1). Remove that setting to screen every uploaded image.</div>')
       + (d.images.checks.map((c, i) => `<div class="row reveal" style="--i:${i}"><div class="th" style="filter:blur(14px)">${c.kind === 'listing' ? `<img src="${esc(c.image)}" alt="">` : ''}</div>
         <div class="main"><b>${c.kind === 'listing' ? `Listing: <a href="#/item/${c.ref_id}" style="color:inherit">${esc(c.listing_title || '#' + c.ref_id)}</a>` : `Uploaded file: ${esc(c.image)}`}</b>
           <small>${esc(c.verdict)} · ${esc(c.category || '')} · ${fmtDateTime(c.created_at)}</small><div class="detail-text">${esc(c.reason || '')}</div></div>
@@ -1241,10 +1241,10 @@ async function adminPage() {
     cases: () => d.cases.map((c, i) => `<div class="row reveal" style="--i:${i}"><div class="main"><a href="#/chat/${c.order.id}" style="text-decoration:none"><b>Case #${c.id} · ${esc(c.order.product_title)}</b></a>
         <small>${esc(c.order.buyer)} ↔ ${esc(c.order.seller)} · ${money(c.order.total_cents)} · opened by ${esc(c.opened_by)} ${fmtDateTime(c.created_at)}</small>
         <div class="detail-text">${esc(c.reason)}</div>
-        ${c.ai ? `<div class="detail-text"><b>AI summary (advice only)</b>, leans ${esc({ pay_seller: 'seller', refund_buyer: 'buyer', needs_human: 'unclear' }[c.ai.recommendation])}, ${esc(c.ai.confidence)} confidence: ${esc(c.ai.summary)}</div>` : ''}
+        ${c.ai ? `<div class="detail-text"><b>Evidence score (advice only)</b>, leans ${esc({ pay_seller: 'seller', refund_buyer: 'buyer', needs_human: 'unclear' }[c.ai.recommendation])}, ${esc(c.ai.confidence)} confidence: ${esc(c.ai.summary)}</div>` : ''}
         <span class="when">${c.evidence.length} evidence item${c.evidence.length === 1 ? '' : 's'}${c.resolution ? ' · ' + esc(c.resolution) : ''}</span></div>
       <div class="side"><span class="status ${c.status === 'resolved' ? 'completed' : 'disputed'}">${esc(c.status)}</span>
-        ${c.status !== 'resolved' ? `<button class="btn ghost sm" data-ai="${c.id}">Run AI review</button><button class="btn success sm" data-pay="${c.id}">Pay seller</button><button class="btn danger sm" data-cref="${c.id}">Refund buyer</button>` : ''}</div></div>`).join('') || '<p class="muted">No cases.</p>',
+        ${c.status !== 'resolved' ? `<button class="btn ghost sm" data-ai="${c.id}">Re-score</button><button class="btn success sm" data-pay="${c.id}">Pay seller</button><button class="btn danger sm" data-cref="${c.id}">Refund buyer</button>` : ''}</div></div>`).join('') || '<p class="muted">No cases.</p>',
     transactions: () => `<div class="table-wrap"><table class="ledger-table"><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Balance</th><th>Amount</th><th>Order</th><th>Note</th></tr></thead><tbody>
       ${d.transactions.map((t) => `<tr><td>${fmtDateTime(t.created_at)}</td><td>${esc(t.type.replace(/_/g, ' '))}</td><td>${esc(t.user)}</td><td>${esc(t.bucket)}</td>
         <td class="${t.amount_cents < 0 ? 'neg' : ''}">${money(t.amount_cents)}</td><td>${t.order_id ? '#' + t.order_id : t.payout_id ? 'payout #' + t.payout_id : ''}</td><td>${esc(t.memo || '')}</td></tr>`).join('')}

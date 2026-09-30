@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { createSandboxProvider } = require('./payments');
-const ai = require('./ai-review');
+const ai = require('./moderation');
 
 const PORT = process.env.PORT || 3000;
 const FEE_RATE = 0.10;       // Lootrova keeps 10% of every successful sale, taken from the seller's share
@@ -321,6 +321,13 @@ function caseData(caseId) {
     order: { id: o.id, status: o.status, price: o.price_cents / 100, buyer_info: o.buyer_info, paid_at: o.paid_at,
       seller_delivered_at: o.seller_delivered_at, buyer_confirmed_at: o.buyer_confirmed_at, case_reason: c.reason },
     listing: JSON.parse(o.listing_snapshot || 'null'),
+    seller_stats: (() => {
+      const r = db.prepare(`SELECT SUM(status IN ('paid', 'completed', 'disputed', 'refunded', 'chargeback')) AS total, SUM(status = 'completed') AS completed,
+        (SELECT COUNT(*) FROM cases c JOIN orders x ON x.id = c.order_id WHERE x.seller_id = ?) AS cases FROM orders WHERE seller_id = ?`).get(o.seller_id, o.seller_id);
+      return { completed: r.completed || 0, dispute_rate: r.total ? (r.cases || 0) / r.total : 0 };
+    })(),
+    buyer_stats: { cases_90d: db.prepare(`SELECT COUNT(*) AS n FROM cases c JOIN orders x ON x.id = c.order_id WHERE x.buyer_id = ? AND c.opened_by = 'buyer' AND c.created_at > ?`)
+      .get(o.buyer_id, new Date(Date.now() - 90 * 86400000).toISOString()).n },
     messages: db.prepare('SELECT sender_id, body, created_at FROM order_messages WHERE order_id = ? ORDER BY id').all(o.id).map((m) => ({ from: who(m.sender_id), at: m.created_at, text: m.body })),
     evidence: [
       ...(o.delivery_file_id ? [{ by: 'seller', note: 'Trade recording uploaded when marking delivered', file_id: o.delivery_file_id, at: o.seller_delivered_at }] : []),
@@ -940,8 +947,8 @@ const routes = {
   },
   'POST /api/admin/cases/:id/ai-review': async (req, res, user, url, id) => {
     requireAdmin(user);
-    if (!ai.enabled()) return send(res, 400, { error: 'AI review is off. Set ANTHROPIC_API_KEY on the server to turn it on.' });
-    try { await runAiReview(id); } catch (e) { return send(res, 502, { error: 'AI review failed: ' + e.message }); }
+    if (!ai.enabled()) return send(res, 400, { error: 'Automatic review is turned off (NSFW_DISABLED=1).' });
+    try { await runAiReview(id); } catch (e) { return send(res, 500, { error: 'Review failed: ' + e.message }); }
     send(res, 200, { case: caseView(id, user) });
   },
   'POST /api/admin/cases/:id/resolve': async (req, res, user, url, id) => {
@@ -1343,5 +1350,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-if (require.main === module) server.listen(PORT, () => console.log(`Lootrova running on http://localhost:${PORT}`));
+if (require.main === module) {
+  server.listen(PORT, () => console.log(`Lootrova running on http://localhost:${PORT}`));
+  ai.warmUp(); // load the NSFW model in the background
+}
 module.exports = server;

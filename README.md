@@ -19,7 +19,7 @@ Opening `public/index.html` directly from disk won't work. The site needs the se
 | `ADMIN_USERS` | none | Comma-separated usernames that get the admin/moderator area, e.g. `ADMIN_USERS=yourname npm start` |
 | `CURRENCY` | `GBP` | Currency for prices |
 | `HOLD_DAYS` | `7` | Days seller earnings stay pending (buyer protection) |
-| `ANTHROPIC_API_KEY` | none | Turns on AI case summaries (advice only; the owner decides every case) and NSFW screening of every uploaded image |
+| `NSFW_DISABLED` | off | Set to `1` to turn off image screening and automatic case scoring (e.g. for fast tests) |
 | `SUPPORT_EMAIL` | none | Shown on the Contact page |
 | `DB_PATH`, `UPLOAD_DIR`, `FILES_DIR` | project folder | Where the database, public images and private product files are stored |
 
@@ -55,16 +55,16 @@ Terms of Service, Privacy, Cookies, Seller Terms, Refund & Dispute, Copyright/IP
 - Launch games: Pet Simulator 99, Steal a Brainrot, Jailbreak and Blox Fruits (`GAMES` in `server.js`).
 - Every order needs **both** confirmations: the seller uploads a screen recording of the trade and confirms delivery, and the buyer confirms receipt. Money is released only when both have confirmed.
 - If either side hasn't confirmed by the deadline (`HOLD_DAYS`), or the buyer reports a problem, a **case** opens automatically. Both sides can add notes, screenshots and videos.
-- With `ANTHROPIC_API_KEY` set, `ai-review.js` asks Claude to review the case evidence and recommend paying the seller, refunding the buyer, or escalating to a person. Admins make the final decision in Admin → Cases.
+- `moderation.js` scores each case with transparent points (recording uploaded, buyer confirmed then disputed, chat, extra evidence, seller and buyer history) and writes a summary of which side the evidence favours. It is advice only: the site owner decides every case in Admin → Cases.
 - Sellers can switch themselves online or offline. Profiles show their status, average hours online per day (last 30 days) and, after 4 delivered sales, their average delivery time.
 
 ## Image safety (NSFW screening)
-With `ANTHROPIC_API_KEY` set, every uploaded image (listing photos and case screenshots) is checked by Claude, including tiny, blurry or low-quality images:
+Every uploaded image (listing photos and case screenshots) is checked on the server by the open-source NSFW.js model, bundled in `node_modules` and run offline, with no outside AI service. Each image is scored whole and as a centre crop, so small or partly hidden content is caught; tiny and low-quality images are scaled up to the model's input size.
 - **unsafe**: the listing is removed or the file hidden, and it appears in Admin → Image safety.
-- **unsure**: hidden until an admin approves or removes it.
+- **unsure** (including formats the server can't decode, like WebP/GIF): hidden until an admin approves or removes it.
 - **safe**: shown normally.
 
-Without a key, images are not screened and Admin → Image safety says so.
+The model loads in the background when the server starts (about 15 seconds). Listings created before it's ready wait until they've been checked.
 
 ## Boosts and macro subscriptions
 - **Boosts** (`BOOSTS` in `server.js`): 24 hours £0.99, 3 days £2.49, 7 days £4.99. Paid to the platform; boosted listings show first with a "⚡ Boosted" label. Buying again extends the boost.

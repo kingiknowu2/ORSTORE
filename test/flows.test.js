@@ -16,7 +16,7 @@ let server;
 
 before(async () => {
   server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT, DB_PATH, UPLOAD_DIR: path.join(TMP, 'up'), FILES_DIR: path.join(TMP, 'files'), ADMIN_USERS: 'admin' },
+    env: { ...process.env, PORT, DB_PATH, UPLOAD_DIR: path.join(TMP, 'up'), FILES_DIR: path.join(TMP, 'files'), ADMIN_USERS: 'admin', NSFW_DISABLED: '1' },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   for (let i = 0; i < 50; i++) {
