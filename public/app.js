@@ -60,7 +60,7 @@ function avatar(name, cls = '') {
 function art(game) {
   const h = hue(game);
   const initials = String(game).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-  return `<div class="art" style="background:radial-gradient(circle at 30% 20%,hsl(${h} 80% 55% / .9),transparent 60%),linear-gradient(135deg,hsl(${h} 65% 28%),hsl(${(h + 70) % 360} 70% 18%))"><span>${esc(initials)}</span></div>`;
+  return `<div class="art" style="background:repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 14px,transparent 14px 28px),linear-gradient(160deg,hsl(${h} 42% 34%),hsl(${(h + 25) % 360} 45% 14%))"><span>${esc(initials)}</span></div>`;
 }
 const imgOf = (l) => (l.images ? l.images[0] : l.image);
 const cover = (l) => (imgOf(l) ? `<img src="${esc(imgOf(l))}" alt="" loading="lazy">` : art(l.game));
@@ -241,19 +241,24 @@ const card = (l, i) => `
 function home() {
   const p = hashParams();
   app.innerHTML = `
-    <section class="hero">
-      <span class="pill reveal"><span class="dot"></span>Every purchase protected until you confirm it works</span>
-      <h1 class="reveal" style="--i:1">The premium marketplace for <span class="grad-text">game items</span></h1>
-      <p class="lead reveal" style="--i:2">Buy and sell skins, items and codes with players you can trust. Only working items, with your money held until you're happy.</p>
-      <form class="search reveal" style="--i:3" id="search">${icon.search}
-        <input name="q" placeholder="Search skins, items, games…" value="${esc(p.get('q') || '')}" autocomplete="off">
-        <button class="btn">Search</button></form>
-      <div class="stats reveal" style="--i:4">
-        <div class="stat"><b data-stat="live">0</b><span>Items live</span></div>
-        <div class="stat"><b data-stat="sellers">0</b><span>Sellers</span></div>
-        <div class="stat"><b data-stat="completed">0</b><span>Trades completed</span></div>
+    <section class="hero hero-banner reveal">
+      <div class="hero-copy">
+        <span class="pill"><span class="dot"></span>Every purchase protected until you confirm it works</span>
+        <h1>Buy &amp; sell <span class="grad-text">game items</span> safely</h1>
+        <p class="lead">Skins, items, codes and mods from real players. Your money is held until you confirm it works.</p>
+        <form class="search" id="search">${icon.search}
+          <input name="q" placeholder="Search skins, items, games…" value="${esc(p.get('q') || '')}" autocomplete="off">
+          <button class="btn">Search</button></form>
+        <div class="stats">
+          <div class="stat"><b data-stat="live">0</b><span>Items live</span></div>
+          <div class="stat"><b data-stat="sellers">0</b><span>Sellers</span></div>
+          <div class="stat"><b data-stat="completed">0</b><span>Trades completed</span></div>
+        </div>
       </div>
+      <div class="hero-art" id="hero-art" aria-hidden="true"></div>
     </section>
+    <div class="section-head"><div><span class="eyebrow">Browse by game</span><h2>Popular games</h2></div></div>
+    <div class="game-tiles" id="game-tiles"></div>
     <div class="section-head"><div><span class="eyebrow">Marketplace</span><h2 id="results-title">Latest drops</h2></div>
       <div class="chips" id="chips"></div></div>
     <div class="grid" id="results">${skeletons(8)}</div>
@@ -292,6 +297,12 @@ async function loadResults(first) {
   };
   $('#chips').innerHTML = [`<a class="chip ${!game ? 'active' : ''}" href="${chipHref('')}">All games</a>`,
     ...data.games.map((g) => `<a class="chip ${g.game.toLowerCase() === game.toLowerCase() ? 'active' : ''}" href="${chipHref(g.game)}">${esc(g.game)}<small>${g.count}</small></a>`)].join('');
+  const tiles = $('#game-tiles');
+  if (tiles && first) tiles.innerHTML = data.games.slice(0, 6).map((g, i) => `<a class="game-tile reveal" style="--i:${i}" href="${chipHref(g.game)}">${art(g.game)}
+    <span class="gt-name">${esc(g.game)}</span><span class="gt-count">${g.count} item${g.count === 1 ? '' : 's'}</span></a>`).join('') || '<p class="muted">Games appear here once items are listed.</p>';
+  const heroArt = $('#hero-art');
+  if (heroArt && first) heroArt.innerHTML = data.listings.slice(0, 3).map((l, i) => `<a class="hero-card hc-${i}" href="#/item/${l.id}">${cover(l)}
+    <span class="hc-info"><b>${esc(l.title)}</b><span>${money(l.price_cents)}</span></span></a>`).join('');
   $('#results-title').textContent = q || game ? `${data.listings.length} result${data.listings.length === 1 ? '' : 's'}` : 'Latest drops';
 
   results.innerHTML = data.listings.map(card).join('') || `
