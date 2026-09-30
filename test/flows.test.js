@@ -399,3 +399,27 @@ test('support messages and cross-site form posts', async () => {
   const r = await fetch(BASE + '/api/support', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' });
   assert.equal(r.status, 415);
 });
+
+test('order chat and required buyer info (e.g. in-game username)', async () => {
+  const s = await user('chat_seller');
+  const b = await user('chat_buyer');
+  const id = await listItem(s, { title: 'Needs Username', buyer_info_label: 'Your Roblox username' });
+  assert.equal((await b.get(`/api/checkout/${id}`)).data.quote.buyer_info_label, 'Your Roblox username');
+  const missing = await b.post('/api/checkout', { listing_id: id, email: 'c@example.com', consent: true });
+  assert.equal(missing.status, 400);
+  assert.equal(missing.data.field, 'buyer_info');
+  const { order } = await pay(b, id, CARD_OK, { buyer_info: 'CoolKid123' });
+  assert.equal(order.buyer_info, 'CoolKid123');
+  assert.equal((await dash(s)).sales[0].buyer_info, 'CoolKid123', 'seller sees the username');
+
+  assert.equal((await b.post(`/api/orders/${order.id}/messages`, { body: 'Hi! Add me: CoolKid123' })).status, 200);
+  assert.equal((await s.post(`/api/orders/${order.id}/messages`, { body: 'Sent the trade now.' })).status, 200);
+  const thread = (await b.get(`/api/orders/${order.id}/messages`)).data.messages;
+  assert.deepEqual(thread.map((m) => [m.sender, m.side]), [['chat_buyer', 'buyer'], ['chat_seller', 'seller']]);
+  assert.equal((await buyerB.get(`/api/orders/${order.id}/messages`)).status, 404, 'outsiders cannot read the chat');
+  assert.equal((await buyerB.post(`/api/orders/${order.id}/messages`, { body: 'hi' })).status, 404);
+  assert.equal((await b.post(`/api/orders/${order.id}/messages`, { body: '  ' })).status, 400);
+
+  const unpaid = await (await user('chat_unpaid')).post('/api/checkout', { listing_id: id, email: 'u@example.com', consent: true, buyer_info: 'x' });
+  assert.equal(unpaid.status, 200);
+});

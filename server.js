@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS reports (
   contact_name TEXT, contact_email TEXT, original_work TEXT,
   status TEXT NOT NULL DEFAULT 'open', -- open | actioned | dismissed
   created_at TEXT NOT NULL, resolved_at TEXT, resolved_by INTEGER, resolution_note TEXT);
+CREATE TABLE IF NOT EXISTS order_messages (
+  id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, sender_id INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT NOT NULL, email TEXT NOT NULL, subject TEXT NOT NULL,
   message TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -106,6 +108,8 @@ addColumn('listings', 'removed_by TEXT');
 addColumn('listings', 'removal_reason TEXT');
 addColumn('listings', 'revoke_access INTEGER NOT NULL DEFAULT 0');
 addColumn('listings', 'updated_at TEXT');
+addColumn('listings', `buyer_info_label TEXT NOT NULL DEFAULT ''`);
+addColumn('orders', 'buyer_info TEXT');
 for (const col of ['product_title', 'currency', 'email', 'consent_at', 'payment_intent_id', 'receipt_no', 'card_brand', 'card_last4',
   'paid_at', 'available_at', 'released_at', 'refunded_at', 'dispute_reason', 'dispute_at', 'note']) addColumn('orders', `${col} TEXT`);
 addColumn('orders', 'buyer_fee_cents INTEGER NOT NULL DEFAULT 0');
@@ -325,7 +329,7 @@ function quote(listingId, user) {
   if (!l.file_id) return no(409, 'This listing doesn’t have a product file yet, so it can’t be bought.');
   return {
     ok: true, listing_id: l.id, product_title: l.title, game: l.game, seller: l.seller, image: JSON.parse(l.images)[0] || null,
-    delivers: l.delivers, price_cents: l.price_cents, buyer_fee_cents: BUYER_FEE_CENTS, total_cents: l.price_cents + BUYER_FEE_CENTS,
+    delivers: l.delivers, buyer_info_label: l.buyer_info_label, price_cents: l.price_cents, buyer_fee_cents: BUYER_FEE_CENTS, total_cents: l.price_cents + BUYER_FEE_CENTS,
     currency: CURRENCY,
   };
 }
@@ -351,7 +355,7 @@ function validateListing(b, user, existing) {
   const f = {
     game: str(b.game, 60), title: str(b.title, 100), description: str(b.description, 3000), delivers: str(b.delivers, 500),
     compatibility: str(b.compatibility, 300), requirements: str(b.requirements, 500), licence: str(b.licence, 20),
-    licence_text: str(b.licence_text, 1500),
+    licence_text: str(b.licence_text, 1500), buyer_info_label: str(b.buyer_info_label, 80),
   };
   const missing = [];
   if (!f.game) missing.push('game');
@@ -402,11 +406,13 @@ function orderView(o, forAdmin = false) {
     can_download: canDownload, download_url: canDownload ? `/download/${o.id}` : null,
     access_note: l.revoke_access ? 'This item was removed for breaking marketplace rules, so downloads are disabled.' : o.note,
     dispute_reason: o.dispute_reason, available_at: o.available_at, released_at: o.released_at,
+    buyer_info: o.buyer_info, buyer_info_label: l.buyer_info_label, messages: msgCount(o.id),
     rated: !!db.prepare('SELECT 1 FROM ratings WHERE order_id = ?').get(o.id),
     last_payment_error: lastAttempt?.status === 'failed' ? lastAttempt.message : null,
     ...(forAdmin ? { fee_cents: o.fee_cents, payment_intent_id: o.payment_intent_id, buyer_id: o.buyer_id, seller_id: o.seller_id } : {}),
   };
 }
+const msgCount = (id) => db.prepare('SELECT COUNT(*) AS n FROM order_messages WHERE order_id = ?').get(id).n;
 function saleView(o) {
   const l = db.prepare('SELECT title, game, images FROM listings WHERE id = ?').get(o.listing_id);
   return {
@@ -414,6 +420,7 @@ function saleView(o) {
     image: JSON.parse(l.images)[0] || null, buyer: db.prepare('SELECT username FROM users WHERE id = ?').get(o.buyer_id).username,
     price_cents: o.price_cents, fee_cents: o.fee_cents, net_cents: o.price_cents - o.fee_cents, paid_at: o.paid_at,
     available_at: o.available_at, released_at: o.released_at, refunded_at: o.refunded_at, dispute_reason: o.dispute_reason,
+    buyer_info: o.buyer_info, buyer_info_label: db.prepare('SELECT buyer_info_label FROM listings WHERE id = ?').get(o.listing_id).buyer_info_label, messages: msgCount(o.id),
   };
 }
 const getOrderFor = (id, user, role) => {
@@ -506,9 +513,9 @@ const routes = {
     if (!b) return send(res, 413, { error: 'Images are too large' });
     const f = validateListing(b, user, null);
     const r = db.prepare(`INSERT INTO listings (seller_id, game, title, description, delivers, compatibility, requirements, licence, licence_text,
-      price_cents, file_id, images, stock, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      price_cents, file_id, images, stock, created_at, updated_at, buyer_info_label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(user.id, f.game, f.title, f.description, f.delivers, f.compatibility, f.requirements, f.licence, f.licence_text,
-        f.price_cents, f.file_id, f.images, f.stock, nowIso(), nowIso());
+        f.price_cents, f.file_id, f.images, f.stock, nowIso(), nowIso(), f.buyer_info_label);
     send(res, 200, { id: r.lastInsertRowid });
   },
   'POST /api/listings/:id/edit': async (req, res, user, url, id) => {
@@ -521,9 +528,9 @@ const routes = {
     const f = validateListing(b, user, l);
     const soldOut = f.stock != null && l.sold_count >= f.stock;
     db.prepare(`UPDATE listings SET game=?, title=?, description=?, delivers=?, compatibility=?, requirements=?, licence=?, licence_text=?,
-      price_cents=?, file_id=?, images=?, stock=?, status=?, updated_at=? WHERE id=? AND seller_id=?`)
+      price_cents=?, file_id=?, images=?, stock=?, status=?, updated_at=?, buyer_info_label=? WHERE id=? AND seller_id=?`)
       .run(f.game, f.title, f.description, f.delivers, f.compatibility, f.requirements, f.licence, f.licence_text, f.price_cents,
-        f.file_id, f.images, f.stock, soldOut ? 'sold' : 'active', nowIso(), id, user.id);
+        f.file_id, f.images, f.stock, soldOut ? 'sold' : 'active', nowIso(), f.buyer_info_label, id, user.id);
     send(res, 200, { id });
   },
   'POST /api/listings/:id/remove': (req, res, user, url, id) => {
@@ -570,6 +577,8 @@ const routes = {
     if (b.consent !== true) {
       return send(res, 400, { field: 'consent', error: 'Please tick the box to confirm you want immediate access and understand you lose your 14-day right to cancel once the download is available.' });
     }
+    const buyerInfo = str(b.buyer_info, 200);
+    if (q.buyer_info_label && !buyerInfo) return send(res, 400, { field: 'buyer_info', error: `The seller needs this to deliver: ${q.buyer_info_label}.` });
     if (b.expected_total_cents !== undefined && Number(b.expected_total_cents) !== q.total_cents) {
       return send(res, 409, { error: 'The price of this item has changed. Please review the new total before paying.', quote: q });
     }
@@ -584,12 +593,12 @@ const routes = {
       order = null;
     }
     if (order) {
-      db.prepare('UPDATE orders SET email = ?, consent_at = ?, created_at = ? WHERE id = ?').run(email, nowIso(), nowIso(), order.id);
+      db.prepare('UPDATE orders SET email = ?, consent_at = ?, created_at = ?, buyer_info = ? WHERE id = ?').run(email, nowIso(), nowIso(), buyerInfo || null, order.id);
     } else {
       tx(() => {
         const r = db.prepare(`INSERT INTO orders (listing_id, buyer_id, seller_id, price_cents, fee_cents, buyer_fee_cents, total_cents, currency,
-          product_title, email, consent_at, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'awaiting_payment', ?)`)
-          .run(listingId, user.id, listing.seller_id, q.price_cents, fee, q.buyer_fee_cents, q.total_cents, CURRENCY, listing.title, email, nowIso(), nowIso());
+          product_title, email, consent_at, status, created_at, buyer_info) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'awaiting_payment', ?, ?)`)
+          .run(listingId, user.id, listing.seller_id, q.price_cents, fee, q.buyer_fee_cents, q.total_cents, CURRENCY, listing.title, email, nowIso(), nowIso(), buyerInfo || null);
         const intent = payments.createIntent({ amount: q.total_cents, currency: CURRENCY, metadata: { order_id: Number(r.lastInsertRowid) } });
         db.prepare('UPDATE orders SET payment_intent_id = ? WHERE id = ?').run(intent.id, r.lastInsertRowid);
         order = { id: Number(r.lastInsertRowid) };
@@ -648,6 +657,27 @@ const routes = {
     send(res, 200, { ok: true });
   },
 
+  // Private chat between the buyer and seller of a paid order.
+  'GET /api/orders/:id/messages': (req, res, user, url, id) => {
+    requireUser(user);
+    const o = getOrderFor(id, user);
+    send(res, 200, {
+      order: { ...(o.buyer_id === user.id || user.role === 'admin' ? orderView(o) : saleView(o)), role: o.buyer_id === user.id ? 'buyer' : o.seller_id === user.id ? 'seller' : 'admin' },
+      messages: db.prepare(`SELECT m.id, m.body, m.created_at, u.username AS sender,
+        CASE WHEN m.sender_id = ? THEN 'buyer' WHEN m.sender_id = ? THEN 'seller' ELSE 'support' END AS side
+        FROM order_messages m JOIN users u ON u.id = m.sender_id WHERE m.order_id = ? ORDER BY m.id`).all(o.buyer_id, o.seller_id, o.id),
+    });
+  },
+  'POST /api/orders/:id/messages': async (req, res, user, url, id) => {
+    requireUser(user);
+    const b = await readBody(req);
+    const o = getOrderFor(id, user);
+    if (o.status === 'awaiting_payment' || o.status === 'cancelled') return send(res, 400, { error: 'Chat opens once the order is paid.' });
+    const body = str(b.body, 2000);
+    if (!body) return send(res, 400, { error: 'Type a message first.' });
+    db.prepare('INSERT INTO order_messages (order_id, sender_id, body, created_at) VALUES (?, ?, ?, ?)').run(o.id, user.id, body, nowIso());
+    send(res, 200, { ok: true });
+  },
   'GET /api/dashboard': (req, res, user) => {
     requireUser(user);
     releaseDue();

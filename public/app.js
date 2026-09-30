@@ -39,6 +39,7 @@ const icon = {
   wallet: svg('<rect x="2" y="6" width="20" height="14" rx="3"/><path d="M16 13h2M2 10h20"/>', 16),
   clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 16),
   box: svg('<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>', 16),
+  chat: svg('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>', 15),
   flag: svg('<path d="M4 22V4a1 1 0 0 1 1-1h12l-2 4 2 4H5"/>', 15),
   lock: svg('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>', 14),
   receipt: svg('<path d="M5 3v18l2-1.5L9 21l2-1.5 2 1.5 2-1.5 2 1.5 2-1.5V3l-2 1.5L15 3l-2 1.5L11 3 9 4.5 7 3z"/><path d="M8 9h8M8 13h6"/>', 16),
@@ -319,7 +320,7 @@ function specsList(l) {
     ['Compatibility', l.compatibility],
     ['Requirements', l.requirements],
     ['Licence', [l.licence_label, l.licence_text].filter(Boolean).join('\n')],
-    ['Delivery', 'Instant download after payment'],
+    ['Delivery', 'Instant download after payment' + (l.buyer_info_label ? `. Seller needs: ${l.buyer_info_label}` : '')],
     ['Copies', l.copies_left == null ? 'Unlimited' : l.copies_left ? `${l.copies_left} left` : 'Sold out'],
   ].filter(([, v]) => v);
   return `<dl class="specs">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
@@ -433,6 +434,9 @@ async function checkoutPage(id) {
         <div class="field"><label for="email">Email for your receipt</label>
           <input id="email" name="email" type="email" autocomplete="email" required value="${esc(store.get('lootrova_email') || '')}">
           <span class="hint">Your receipt is also saved to your account.</span></div>
+        ${q.buyer_info_label ? `<div class="field"><label for="binfo">${esc(q.buyer_info_label)}</label>
+          <input id="binfo" name="binfo" required maxlength="200" placeholder="The seller needs this to deliver your item">
+          <span class="hint">Only the seller of this order can see this. You can also message them after paying.</span></div>` : ''}
         <div class="block-title" style="margin-top:6px">Payment</div>
         ${CFG.test_mode ? `<div class="test-cards"><b>Test mode: no real money is taken</b>
           ${CFG.test_cards.map((c) => `<button type="button" data-card="${c.number}"><code>${formatCardNumber(c.number)}</code> — ${esc(c.label)}</button>`).join('')}
@@ -471,6 +475,7 @@ async function checkoutPage(id) {
     if (paying) return;
     err.textContent = '';
     if (!f.email.checkValidity() || !f.email.value) { err.textContent = 'Enter a valid email address for your receipt.'; f.email.focus(); return; }
+    if (f.binfo && !f.binfo.value.trim()) { err.textContent = `Please fill in: ${q.buyer_info_label}.`; f.binfo.focus(); return; }
     if (!f.cc.value || !f.exp.value || !f.cvc.value) { err.textContent = 'Enter your card number, expiry date and CVC.'; return; }
     if (!f.consent.checked) {
       err.textContent = 'Please tick the box to confirm you want immediate access and understand you lose your 14-day right to cancel.';
@@ -482,7 +487,7 @@ async function checkoutPage(id) {
       await busy(payBtn, async () => {
         let co;
         try {
-          co = await api('/checkout', { listing_id: q.listing_id, email: f.email.value, consent: true, expected_total_cents: q.total_cents });
+          co = await api('/checkout', { listing_id: q.listing_id, email: f.email.value, consent: true, buyer_info: f.binfo?.value, expected_total_cents: q.total_cents });
         } catch (e2) {
           if (e2.status === 409 && e2.data?.quote) { q = e2.data.quote; $('#summary').innerHTML = summary(q); payBtn.dataset.total = q.total_cents; }
           throw e2;
@@ -531,7 +536,7 @@ async function orderPage(id) {
       ${o.can_download
         ? `<a class="btn xl block" href="${o.download_url}" id="download">${icon.download} Download</a>`
         : `<div class="notice bad">${esc(o.access_note || 'Downloads aren’t available for this order.')}</div>`}
-      <div class="links"><a class="btn ghost sm" href="#/receipt/${o.id}">${icon.receipt} View receipt</a><a class="btn ghost sm" href="#/dashboard?tab=library">Go to my library</a></div>
+      <div class="links"><a class="btn ghost sm" href="#/chat/${o.id}">${icon.chat} Message seller</a><a class="btn ghost sm" href="#/receipt/${o.id}">${icon.receipt} View receipt</a><a class="btn ghost sm" href="#/dashboard?tab=library">Go to my library</a></div>
       <p class="fine">Problem with the item? You can request a refund from your library during the ${CFG.hold_days}-day protection period.</p>
     </div>`;
 }
@@ -563,6 +568,44 @@ function statusLabel(s, who) {
     disputed: 'Refund requested', refunded: 'Refunded', chargeback: 'Charged back', cancelled: 'Cancelled',
     requested: 'Processing', failed: 'Failed', active: 'Active', sold: 'Sold out', removed: 'Removed',
   })[s] || s;
+}
+
+// ---------- Order chat ----------
+let chatTimer;
+async function chatPage(id) {
+  if (!me) return needLogin('Log in to see your messages');
+  const render = async (first) => {
+    const { order: o, messages } = await api(`/orders/${id}/messages`);
+    if (!$('#chat-list')) {
+      const other = o.role === 'seller' ? o.buyer : o.seller;
+      app.innerHTML = `<a class="back" href="#/dashboard?tab=${o.role === 'seller' ? 'sales' : 'library'}">${icon.arrowLeft} Back to dashboard</a>
+        <div class="chat glass reveal">
+          <div class="chat-head"><div class="th">${cover(o)}</div><div style="flex:1;min-width:0"><b>${esc(o.product_title)}</b>
+            <small class="muted">${esc(o.receipt_no || '')} · chatting with ${avatar(other)} <b>${esc(other)}</b></small></div>
+            <span class="status ${o.status}">${statusLabel(o.status, o.role === 'seller' ? 'seller' : 'buyer')}</span></div>
+          ${o.buyer_info ? `<div class="notice ok" style="margin:14px 0 0">${esc(o.buyer_info_label || 'Buyer info')}: <b>${esc(o.buyer_info)}</b></div>` : ''}
+          <div class="chat-list" id="chat-list"></div>
+          <form class="chat-form" id="cf"><input name="body" placeholder="Write a message… (e.g. your in-game username)" autocomplete="off" maxlength="2000">
+            <button class="btn">Send</button></form>
+          <p class="fine">Keep trades on the platform: payment protection only covers orders paid here. Never share passwords.</p>
+        </div>`;
+      $('#cf').onsubmit = async (e) => {
+        e.preventDefault();
+        const body = e.target.body.value.trim();
+        if (!body) return;
+        try { await api(`/orders/${id}/messages`, { body }); e.target.body.value = ''; render(); } catch (err) { toast(err.message, 'err'); }
+      };
+    }
+    const list = $('#chat-list');
+    const n = list.children.length;
+    list.innerHTML = messages.map((m) => `<div class="msg ${m.sender === me.username ? 'me' : ''} ${m.side}">
+      <small>${esc(m.sender)}${m.side === 'support' ? ' · support' : ''} · ${fmtDateTime(m.created_at)}</small><p>${esc(m.body)}</p></div>`).join('')
+      || '<p class="muted" style="text-align:center;margin:30px 0">No messages yet. Say hi and share anything the seller needs to deliver.</p>';
+    if (first || messages.length !== n) list.scrollTop = list.scrollHeight;
+  };
+  await render(true);
+  clearInterval(chatTimer);
+  chatTimer = setInterval(() => { if (!location.hash.startsWith('#/chat/')) return clearInterval(chatTimer); render().catch(() => {}); }, 4000);
 }
 
 // ---------- Auth ----------
@@ -669,6 +712,9 @@ async function sellPage(editId) {
           <input id="compatibility" name="compatibility" placeholder="e.g. PC (Windows), Minecraft Java 1.20+" maxlength="300" required value="${v('compatibility')}"></div>
         <div class="field"><label for="requirements">Requirements <span class="muted" style="font-weight:400">(optional)</span></label>
           <input id="requirements" name="requirements" placeholder="e.g. Requires the base game and Forge" maxlength="500" value="${v('requirements')}"></div>
+        <div class="field"><label for="buyer_info_label">Ask the buyer for <span class="muted" style="font-weight:400">(optional)</span></label>
+          <input id="buyer_info_label" name="buyer_info_label" maxlength="80" placeholder="e.g. Your Roblox username" value="${v('buyer_info_label')}">
+          <span class="hint">If the game needs it to deliver (like a username or friend code), the buyer must enter it at checkout.</span></div>
         <div class="field"><label for="licence">Licence</label><select id="licence" name="licence" required>
           <option value="">Choose a licence…</option>${licenceOpts}</select><span class="hint" id="licence-hint"></span></div>
         <div class="field" id="custom-licence" hidden><label for="licence_text">Custom licence terms</label>
@@ -780,7 +826,7 @@ async function sellPage(editId) {
     try {
       const body = {
         game: f.game.value, title: f.title.value, description: f.description.value, delivers: f.delivers.value,
-        compatibility: f.compatibility.value, requirements: f.requirements.value, licence: f.licence.value, licence_text: f.licence_text.value,
+        compatibility: f.compatibility.value, requirements: f.requirements.value, buyer_info_label: f.buyer_info_label.value, licence: f.licence.value, licence_text: f.licence_text.value,
         price: f.price.value, copies: f.copies.value, usable: f.usable.checked, owns_rights: f.owns_rights.checked, images,
         file_id: productFile?.id ?? null,
       };
@@ -834,10 +880,12 @@ async function dashboard() {
     <div class="side"><span class="status ${o.status}">${statusLabel(o.status, 'buyer')}</span>
       ${o.can_download ? `<a class="btn sm" href="${o.download_url}">${icon.download} Download</a>` : ''}
       <a class="btn ghost sm" href="#/receipt/${o.id}">Receipt</a>
+      ${o.status !== 'cancelled' ? `<a class="btn ghost sm" href="#/chat/${o.id}">${icon.chat} Seller${o.messages ? ` (${o.messages})` : ''}</a>` : ''}
       ${o.status === 'paid' ? `<button class="btn success sm" data-confirm="${o.id}">It works</button><button class="btn danger sm" data-refund-req="${o.id}">Request refund</button>` : ''}
       ${o.status === 'disputed' ? `<button class="btn success sm" data-confirm="${o.id}">It works now</button>` : ''}</div></div>`;
   const saleRow = (o, i) => `<div class="row reveal" style="--i:${i}">${th(o)}
     <div class="main"><b>${esc(o.product_title)}</b><small>${esc(o.game)} · to ${esc(o.buyer)} · ${fmtDate(o.paid_at)} · ${esc(o.receipt_no || '')}</small>
+      ${o.buyer_info ? `<div class="money"><span>${esc(o.buyer_info_label || 'Buyer info')}: <b>${esc(o.buyer_info)}</b></span></div>` : ''}
       <div class="money"><span>Sale <b>${money(o.price_cents)}</b></span><span>Platform fee <b>−${money(o.fee_cents)}</b></span>${['refunded', 'chargeback'].includes(o.status) ? `<span class="reversed">Earnings reversed <b>${money(o.net_cents)}</b></span>` : `<span class="earn">Your earnings <b>${money(o.net_cents)}</b></span>`}</div>
       <span class="when">${o.status === 'paid' ? `Pending: available on ${fmtDate(o.available_at)}, or sooner if the buyer confirms`
         : o.status === 'completed' ? `Available since ${fmtDate(o.released_at)}`
@@ -845,6 +893,7 @@ async function dashboard() {
         : o.status === 'refunded' ? `Refunded ${fmtDate(o.refunded_at)}: earnings reversed`
         : o.status === 'chargeback' ? `Charged back ${fmtDate(o.refunded_at)}: earnings reversed` : ''}</span></div>
     <div class="side"><span class="status ${o.status}">${statusLabel(o.status, 'seller')}</span>
+      <a class="btn ghost sm" href="#/chat/${o.id}">${icon.chat} Buyer${o.messages ? ` (${o.messages})` : ''}</a>
       ${o.status === 'disputed' ? `<button class="btn danger sm" data-refund="${o.id}">Refund buyer</button>` : ''}</div></div>`;
   const listingRow = (l, i) => `<div class="row reveal" style="--i:${i}">${th(l)}
     <div class="main"><a href="#/item/${l.id}" style="text-decoration:none"><b>${esc(l.title)}</b></a><small>${esc(l.game)} · ${money(l.price_cents)} · ${l.sold_count} sold${l.stock != null ? ` of ${l.stock}` : ''}</small>
@@ -1099,6 +1148,7 @@ async function route() {
     else if (view === 'checkout') await checkoutPage(Number(id));
     else if (view === 'order') await orderPage(Number(id));
     else if (view === 'receipt') await receiptPage(Number(id));
+    else if (view === 'chat') await chatPage(Number(id));
     else if (view === 'admin') await adminPage();
     else if (view === 'policy') policyPage(id);
     else if (view === 'contact') contactPage();
