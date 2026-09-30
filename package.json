@@ -1,8 +1,21 @@
 {
   "name": "lootrova",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Marketplace for digital game items",
   "main": "server.js",
-  "engines": { "node": ">=22.5" },
-  "scripts": { "start": "node server.js" }
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "train": "node ml/train-chat.js",
+    "eval": "node ml/eval-big.js 50000"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "jpeg-js": "^0.4.4",
+    "nsfwjs": "^4.3.0",
+    "pngjs": "^7.0.0"
+  }
 }

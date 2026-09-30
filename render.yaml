@@ -1,0 +1,15 @@
+# One-click deploy on Render (render.com): New -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: lootrova
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DEMO_SEED
+        value: "1"
+      - key: ADMIN_USERS
+        sync: false # set to the username you'll sign up with, to get the Admin area
