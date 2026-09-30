@@ -19,7 +19,7 @@ Opening `public/index.html` directly from disk won't work. The site needs the se
 | `ADMIN_USERS` | none | Comma-separated usernames that get the admin/moderator area, e.g. `ADMIN_USERS=yourname npm start` |
 | `CURRENCY` | `GBP` | Currency for prices |
 | `HOLD_DAYS` | `7` | Days seller earnings stay pending (buyer protection) |
-| `ANTHROPIC_API_KEY` | none | Turns on AI evidence review for cases (recommendations only; an admin decides) |
+| `ANTHROPIC_API_KEY` | none | Turns on AI case summaries (advice only; the owner decides every case) and NSFW screening of every uploaded image |
 | `SUPPORT_EMAIL` | none | Shown on the Contact page |
 | `DB_PATH`, `UPLOAD_DIR`, `FILES_DIR` | project folder | Where the database, public images and private product files are stored |
 
@@ -57,3 +57,11 @@ Terms of Service, Privacy, Cookies, Seller Terms, Refund & Dispute, Copyright/IP
 - If either side hasn't confirmed by the deadline (`HOLD_DAYS`), or the buyer reports a problem, a **case** opens automatically. Both sides can add notes, screenshots and videos.
 - With `ANTHROPIC_API_KEY` set, `ai-review.js` asks Claude to review the case evidence and recommend paying the seller, refunding the buyer, or escalating to a person. Admins make the final decision in Admin → Cases.
 - Sellers can switch themselves online or offline. Profiles show their status, average hours online per day (last 30 days) and, after 4 delivered sales, their average delivery time.
+
+## Image safety (NSFW screening)
+With `ANTHROPIC_API_KEY` set, every uploaded image (listing photos and case screenshots) is checked by Claude, including tiny, blurry or low-quality images:
+- **unsafe**: the listing is removed or the file hidden, and it appears in Admin → Image safety.
+- **unsure**: hidden until an admin approves or removes it.
+- **safe**: shown normally.
+
+Without a key, images are not screened and Admin → Image safety says so.

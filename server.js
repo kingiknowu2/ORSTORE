@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS cases (
 CREATE TABLE IF NOT EXISTS case_evidence (
   id INTEGER PRIMARY KEY, case_id INTEGER NOT NULL, user_id INTEGER NOT NULL, file_id INTEGER, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS presence_sessions (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, started_at TEXT NOT NULL, ended_at TEXT);
+CREATE TABLE IF NOT EXISTS image_checks (
+  id INTEGER PRIMARY KEY, kind TEXT NOT NULL, ref_id INTEGER NOT NULL, image TEXT NOT NULL, verdict TEXT NOT NULL,
+  category TEXT, reason TEXT, reviewed_by INTEGER, review_decision TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT NOT NULL, email TEXT NOT NULL, subject TEXT NOT NULL,
   message TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -128,6 +131,9 @@ addColumn('orders', 'buyer_info TEXT');
 for (const col of ['seller_delivered_at', 'buyer_confirmed_at', 'listing_snapshot']) addColumn('orders', `${col} TEXT`);
 addColumn('orders', 'delivery_file_id INTEGER');
 addColumn('users', 'online INTEGER NOT NULL DEFAULT 0');
+addColumn('files', `safety TEXT NOT NULL DEFAULT 'unchecked'`); // unchecked | pending | safe | unsafe | unsure
+addColumn('files', 'safety_reason TEXT');
+addColumn('listings', `image_safety TEXT NOT NULL DEFAULT 'unchecked'`); // unchecked | pending | safe | flagged
 addColumn('users', 'last_seen_at TEXT');
 for (const col of ['product_title', 'currency', 'email', 'consent_at', 'payment_intent_id', 'receipt_no', 'card_brand', 'card_last4',
   'paid_at', 'available_at', 'released_at', 'refunded_at', 'dispute_reason', 'dispute_at', 'note']) addColumn('orders', `${col} TEXT`);
@@ -261,7 +267,7 @@ function caseData(caseId) {
       ...db.prepare('SELECT * FROM case_evidence WHERE case_id = ? ORDER BY id').all(c.id).map((e) => ({ by: who(e.user_id), note: e.note, file_id: e.file_id, at: e.created_at })),
     ].map((e) => {
       const f = e.file_id && db.prepare('SELECT * FROM files WHERE id = ?').get(e.file_id);
-      return { ...e, file: f ? { id: f.id, name: f.original_name, ext: f.ext, size: f.size, path: path.join(FILES_DIR, path.basename(f.stored_name)) } : null };
+      return { ...e, file: f ? { id: f.id, name: f.original_name, ext: f.ext, size: f.size, unsafe: f.safety === 'unsafe', path: path.join(FILES_DIR, path.basename(f.stored_name)) } : null };
     }),
   };
 }
@@ -274,13 +280,47 @@ async function runAiReview(caseId) {
     .run(v.recommendation, v.confidence, v.summary, JSON.stringify({ key_evidence: v.key_evidence, missing_evidence: v.missing_evidence }), nowIso(), caseId);
   return true;
 }
+// ---------- NSFW image screening ----------
+const IMG_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+async function screenImage(buf, ext) {
+  if (!ai.enabled()) return { verdict: 'unchecked' };
+  try { return await ai.checkImage(buf, IMG_MIME[ext]); }
+  catch (e) { console.error('Image check failed', e.message); return { verdict: 'unsure', category: 'other', reason: 'Automatic check failed; needs a person to look.' }; }
+}
+// Listing photos: the listing is hidden while checking, removed if anything is unsafe, held for review if unsure.
+async function screenListing(listingId) {
+  if (!ai.enabled()) return;
+  const l = db.prepare('SELECT images FROM listings WHERE id = ?').get(listingId);
+  db.prepare(`UPDATE listings SET image_safety = 'pending' WHERE id = ?`).run(listingId);
+  let worst = 'safe';
+  for (const img of JSON.parse(l.images)) {
+    const file = path.join(UPLOAD_DIR, path.basename(img));
+    if (!fs.existsSync(file)) continue;
+    const v = await screenImage(fs.readFileSync(file), path.extname(file).slice(1));
+    db.prepare('INSERT INTO image_checks (kind, ref_id, image, verdict, category, reason, created_at) VALUES (?,?,?,?,?,?,?)').run('listing', listingId, img, v.verdict, v.category, v.reason, nowIso());
+    if (v.verdict === 'unsafe') worst = 'unsafe'; else if (v.verdict === 'unsure' && worst !== 'unsafe') worst = 'unsure';
+  }
+  if (worst === 'unsafe') {
+    db.prepare(`UPDATE listings SET image_safety = 'flagged', status = 'removed', removed_by = 'system', removal_reason = 'An image failed the safety check', updated_at = ? WHERE id = ?`).run(nowIso(), listingId);
+    cancelOpenCheckouts('l.id = ?', listingId);
+  } else db.prepare('UPDATE listings SET image_safety = ? WHERE id = ?').run(worst === 'unsure' ? 'flagged' : 'safe', listingId);
+}
+// Uploaded image files (e.g. case screenshots) are hidden unless they pass.
+async function screenFile(fileId) {
+  const f = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId);
+  if (!f || !IMG_MIME[f.ext] || !ai.enabled()) return;
+  db.prepare(`UPDATE files SET safety = 'pending' WHERE id = ?`).run(fileId);
+  const v = await screenImage(fs.readFileSync(path.join(FILES_DIR, path.basename(f.stored_name))), f.ext);
+  db.prepare('UPDATE files SET safety = ?, safety_reason = ? WHERE id = ?').run(v.verdict, v.reason || null, fileId);
+  db.prepare('INSERT INTO image_checks (kind, ref_id, image, verdict, category, reason, created_at) VALUES (?,?,?,?,?,?,?)').run('file', fileId, f.original_name, v.verdict, v.category, v.reason, nowIso());
+}
 function caseView(caseId, forUser) {
   const d = caseData(caseId);
   return {
     id: d.case.id, status: d.case.status, reason: d.case.reason, opened_by: d.case.opened_by, created_at: d.case.created_at,
     ai: d.case.ai_reviewed_at ? { recommendation: d.case.ai_recommendation, confidence: d.case.ai_confidence, summary: d.case.ai_summary, ...JSON.parse(d.case.ai_details || '{}'), at: d.case.ai_reviewed_at } : null,
     ai_enabled: ai.enabled(), resolution: d.case.resolution, resolved_at: d.case.resolved_at,
-    evidence: d.evidence.map((e) => ({ by: e.by, note: e.note, at: e.at, file: e.file && { id: e.file.id, name: e.file.name, ext: e.file.ext, size: e.file.size, url: `/evidence/${e.file.id}` } })),
+    evidence: d.evidence.map((e) => { const sf = e.file && db.prepare('SELECT safety FROM files WHERE id = ?').get(e.file.id).safety; return { by: e.by, note: e.note, at: e.at, file: e.file && { id: e.file.id, name: e.file.name, ext: e.file.ext, size: e.file.size, url: `/evidence/${e.file.id}`, safety: sf } }; }),
     ...(forUser?.role === 'admin' ? { listing_at_purchase: d.listing } : {}),
   };
 }
@@ -576,7 +616,7 @@ const routes = {
   'GET /api/listings': (req, res, user, url) => {
     const q = '%' + (url.searchParams.get('q') || '') + '%';
     const game = url.searchParams.get('game') || '';
-    const visible = `l.status = 'active' AND u.status = 'active' AND l.file_id IS NOT NULL`;
+    const visible = `l.status = 'active' AND u.status = 'active' AND l.file_id IS NOT NULL AND l.image_safety NOT IN ('pending', 'flagged')`;
     const rows = db.prepare(LISTING_SELECT + ` WHERE ${visible} AND (l.title LIKE ? OR l.game LIKE ?)
       AND (? = '' OR l.game = ? COLLATE NOCASE) ORDER BY l.id DESC LIMIT 100`).all(q, q, game, game);
     const games = db.prepare(`SELECT l.game, COUNT(*) AS count FROM listings l JOIN users u ON u.id = l.seller_id WHERE ${visible}
@@ -590,7 +630,7 @@ const routes = {
   'GET /api/listings/:id': (req, res, user, url, id) => {
     const l = db.prepare(LISTING_SELECT + ' WHERE l.id = ?').get(id);
     const privileged = user && (user.role === 'admin' || (l && l.seller_id === user.id));
-    if (!l || (!privileged && (l.status === 'removed' || l.seller_status !== 'active'))) return send(res, 404, { error: 'This item isn’t available.' });
+    if (!l || (!privileged && (l.status === 'removed' || l.seller_status !== 'active' || ['pending', 'flagged'].includes(l.image_safety)))) return send(res, 404, { error: l && l.image_safety === 'pending' ? 'This item is being checked and will be visible shortly.' : 'This item isn’t available.' });
     send(res, 200, { listing: listingDetail(l, user), fee_rate: FEE_RATE });
   },
   // Product files are uploaded as raw bytes before the listing is saved.
@@ -609,6 +649,7 @@ const routes = {
     fs.writeFileSync(path.join(FILES_DIR, stored), buf);
     const r = db.prepare('INSERT INTO files (owner_id, stored_name, original_name, ext, size, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(user.id, stored, name, ext, buf.length, nowIso());
+    screenFile(Number(r.lastInsertRowid)).catch((e) => console.error(e.message));
     send(res, 200, { id: r.lastInsertRowid, name, ext, size: buf.length });
   },
   'POST /api/listings': async (req, res, user) => {
@@ -620,6 +661,8 @@ const routes = {
       price_cents, file_id, images, stock, created_at, updated_at, buyer_info_label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(user.id, f.game, f.title, f.description, f.delivers, f.compatibility, f.requirements, f.licence, f.licence_text,
         f.price_cents, f.file_id, f.images, f.stock, nowIso(), nowIso(), f.buyer_info_label);
+    if (ai.enabled() && JSON.parse(f.images).length) db.prepare(`UPDATE listings SET image_safety = 'pending' WHERE id = ?`).run(r.lastInsertRowid);
+    screenListing(Number(r.lastInsertRowid)).catch((e) => console.error(e.message));
     send(res, 200, { id: r.lastInsertRowid });
   },
   'POST /api/listings/:id/edit': async (req, res, user, url, id) => {
@@ -635,6 +678,7 @@ const routes = {
       price_cents=?, file_id=?, images=?, stock=?, status=?, updated_at=?, buyer_info_label=? WHERE id=? AND seller_id=?`)
       .run(f.game, f.title, f.description, f.delivers, f.compatibility, f.requirements, f.licence, f.licence_text, f.price_cents,
         f.file_id, f.images, f.stock, soldOut ? 'sold' : 'active', nowIso(), f.buyer_info_label, id, user.id);
+    if (ai.enabled() && f.images !== l.images) { db.prepare(`UPDATE listings SET image_safety = 'pending' WHERE id = ?`).run(id); screenListing(id).catch((e) => console.error(e.message)); }
     send(res, 200, { id });
   },
   'POST /api/listings/:id/remove': (req, res, user, url, id) => {
@@ -802,6 +846,24 @@ const routes = {
       db.prepare('UPDATE presence_sessions SET ended_at = ? WHERE user_id = ? AND ended_at IS NULL').run(nowIso(), user.id);
     }
     send(res, 200, { presence: presence(user.id) });
+  },
+  'GET /api/admin/image-checks': (req, res, user) => {
+    requireAdmin(user);
+    send(res, 200, { checks: db.prepare(`SELECT c.*, CASE WHEN c.kind = 'listing' THEN (SELECT title FROM listings WHERE id = c.ref_id) END AS listing_title
+      FROM image_checks c WHERE c.verdict != 'safe' ORDER BY c.review_decision IS NOT NULL, c.id DESC LIMIT 200`).all(), ai_enabled: ai.enabled() });
+  },
+  // Moderator decision on a flagged image: approve (make visible) or remove.
+  'POST /api/admin/image-checks/:id/decide': async (req, res, user, url, id) => {
+    requireAdmin(user);
+    const b = await readBody(req);
+    const c = db.prepare('SELECT * FROM image_checks WHERE id = ?').get(id);
+    if (!c) return send(res, 404, { error: 'Not found.' });
+    const approve = b.decision === 'approve';
+    db.prepare('UPDATE image_checks SET reviewed_by = ?, review_decision = ? WHERE id = ?').run(user.id, approve ? 'approved' : 'removed', id);
+    if (c.kind === 'file') db.prepare('UPDATE files SET safety = ? WHERE id = ?').run(approve ? 'safe' : 'unsafe', c.ref_id);
+    else if (approve) db.prepare(`UPDATE listings SET image_safety = 'safe', status = CASE WHEN removed_by = 'system' THEN 'active' ELSE status END, removed_by = CASE WHEN removed_by = 'system' THEN NULL ELSE removed_by END WHERE id = ?`).run(c.ref_id);
+    else { db.prepare(`UPDATE listings SET image_safety = 'flagged', status = 'removed', removed_by = 'admin', removal_reason = 'Image breaks content rules', updated_at = ? WHERE id = ?`).run(nowIso(), c.ref_id); cancelOpenCheckouts('l.id = ?', c.ref_id); }
+    send(res, 200, { ok: true });
   },
   'GET /api/admin/cases': (req, res, user) => {
     requireAdmin(user);
@@ -1071,6 +1133,7 @@ function handleEvidence(res, user, fileId) {
   if (!f || !orders.length || !(user.role === 'admin' || orders.some((o) => o.buyer_id === user.id || o.seller_id === user.id))) {
     return deniedPage(res, 403, 'Access denied', 'Only people involved in this order can view its evidence.');
   }
+  if (['unsafe', 'unsure', 'pending'].includes(f.safety) && user.role !== 'admin') return deniedPage(res, 403, 'Image hidden', f.safety === 'pending' ? 'This image is still being safety-checked.' : 'This image was hidden by the safety check and is waiting for moderator review.');
   const types = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
   res.writeHead(200, { 'Content-Type': types[f.ext] || 'application/octet-stream', 'Cache-Control': 'private, no-store',
     ...(types[f.ext] ? {} : { 'Content-Disposition': 'attachment' }) });

@@ -632,12 +632,12 @@ async function orderPanel(id) {
     ${c ? `<div class="casebox"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h3>Case #${c.id}</h3>
         <span class="status ${c.status === 'resolved' ? 'completed' : 'disputed'}">${c.status === 'resolved' ? 'Resolved' : 'Under review'}</span></div>
       <p class="muted" style="margin:4px 0 10px">${esc(c.reason)}</p>
-      ${c.ai ? `<div class="ai"><b>AI evidence review</b> <span class="muted">(recommendation, a moderator makes the final decision)</span><p>${esc(c.ai.summary)}</p>
+      ${c.ai ? `<div class="ai"><b>AI summary</b> <span class="muted">· evidence leans towards: ${esc({ pay_seller: 'the seller', refund_buyer: 'the buyer', needs_human: 'unclear' }[c.ai.recommendation])} (${esc(c.ai.confidence)} confidence). The AI never decides; the site owner does.</span><p>${esc(c.ai.summary)}</p>
         ${c.ai.missing_evidence?.length ? `<small class="muted">Would help: ${c.ai.missing_evidence.map(esc).join(' · ')}</small>` : ''}</div>`
         : `<div class="ai"><b>AI evidence review</b><p class="muted">${c.ai_enabled ? 'Reviewing the evidence…' : 'Waiting for review. Add your evidence below.'}</p></div>`}
       ${c.resolution ? `<div class="notice ok">Decision: ${esc(c.resolution)}</div>` : ''}
       <div class="evlist">${c.evidence.map((e) => `<div class="ev"><b>${esc(e.by)}</b> <small class="muted">${fmtDateTime(e.at)}</small>
-        ${e.note ? `<p>${esc(e.note)}</p>` : ''}${e.file ? `<a href="${e.file.url}" target="_blank" rel="noopener">${icon.image} ${esc(e.file.name)}</a>` : ''}</div>`).join('') || '<p class="muted">No evidence yet.</p>'}</div>
+        ${e.note ? `<p>${esc(e.note)}</p>` : ''}${e.file ? (['unsafe', 'unsure'].includes(e.file.safety) ? `<span class="muted">${icon.image} ${esc(e.file.name)} · hidden by safety check</span>` : e.file.safety === 'pending' ? `<span class="muted">${icon.image} ${esc(e.file.name)} · safety check in progress…</span>` : `<a href="${e.file.url}" target="_blank" rel="noopener">${icon.image} ${esc(e.file.name)}</a>`) : ''}</div>`).join('') || '<p class="muted">No evidence yet.</p>'}</div>
       ${c.status !== 'resolved' && o.role !== 'admin' ? `<form id="ev-form" class="evform"><textarea id="ev-note" placeholder="Explain what happened" style="min-height:70px"></textarea>
         <input type="file" id="ev-file" accept="video/*,image/*"><p class="error" id="ev-err"></p><button class="btn ghost">Add evidence</button></form>` : ''}</div>` : ''}`;
   const df = $('#deliver-form');
@@ -1098,11 +1098,12 @@ async function adminPage() {
   if (me.role !== 'admin') throw new Error('Admins only.');
   const d = await api('/admin/overview');
   d.cases = (await api('/admin/cases')).cases;
+  d.images = await api('/admin/image-checks');
   const openReports = d.reports.filter((r) => r.status === 'open').length;
   const toPay = d.payouts.filter((p) => p.status === 'requested').length;
   const tabs = [['reports', 'Reports', openReports], ['disputes', 'Refund requests', d.disputes.length], ['orders', 'Orders', d.orders.length],
     ['listings', 'Listings', d.listings.length], ['users', 'Sellers', d.users.length], ['payouts', 'Payouts', toPay],
-    ['cases', 'Cases', (d.cases || []).filter((c) => c.status !== 'resolved').length], ['transactions', 'Transactions', d.transactions.length], ['support', 'Support', d.support.length]];
+    ['images', 'Image safety', (d.images.checks || []).filter((c) => !c.review_decision).length], ['cases', 'Cases', (d.cases || []).filter((c) => c.status !== 'resolved').length], ['transactions', 'Transactions', d.transactions.length], ['support', 'Support', d.support.length]];
   let tab = hashParams().get('tab') || 'reports';
 
   app.innerHTML = `
@@ -1147,10 +1148,16 @@ async function adminPage() {
         <small>Requested ${fmtDateTime(p.created_at)}${p.reference ? ' · Ref ' + esc(p.reference) : ''}</small></div>
       <div class="side"><span class="status ${p.status === 'paid' ? 'completed' : p.status}">${statusLabel(p.status)}</span>
         ${p.status === 'requested' ? `<button class="btn success sm" data-paid="${p.id}">Mark paid</button><button class="btn ghost sm" data-failed="${p.id}">Mark failed</button>` : ''}</div></div>`).join('') || '<p class="muted">No payout requests.</p>',
+    images: () => (d.images.ai_enabled ? '' : '<div class="notice">Image safety checks are off. Set ANTHROPIC_API_KEY on the server to screen every uploaded image.</div>')
+      + (d.images.checks.map((c, i) => `<div class="row reveal" style="--i:${i}"><div class="th" style="filter:blur(14px)">${c.kind === 'listing' ? `<img src="${esc(c.image)}" alt="">` : ''}</div>
+        <div class="main"><b>${c.kind === 'listing' ? `Listing: <a href="#/item/${c.ref_id}" style="color:inherit">${esc(c.listing_title || '#' + c.ref_id)}</a>` : `Uploaded file: ${esc(c.image)}`}</b>
+          <small>${esc(c.verdict)} · ${esc(c.category || '')} · ${fmtDateTime(c.created_at)}</small><div class="detail-text">${esc(c.reason || '')}</div></div>
+        <div class="side">${c.review_decision ? `<span class="status ${c.review_decision === 'approved' ? 'completed' : 'refunded'}">${esc(c.review_decision)}</span>`
+          : `<button class="btn ghost sm" data-img-ok="${c.id}">Approve</button><button class="btn danger sm" data-img-rm="${c.id}">Remove</button>`}</div></div>`).join('') || '<p class="muted">No flagged images.</p>'),
     cases: () => d.cases.map((c, i) => `<div class="row reveal" style="--i:${i}"><div class="main"><a href="#/chat/${c.order.id}" style="text-decoration:none"><b>Case #${c.id} · ${esc(c.order.product_title)}</b></a>
         <small>${esc(c.order.buyer)} ↔ ${esc(c.order.seller)} · ${money(c.order.total_cents)} · opened by ${esc(c.opened_by)} ${fmtDateTime(c.created_at)}</small>
         <div class="detail-text">${esc(c.reason)}</div>
-        ${c.ai ? `<div class="detail-text"><b>AI: ${esc(c.ai.recommendation.replace('_', ' '))}</b> (${esc(c.ai.confidence)} confidence): ${esc(c.ai.summary)}</div>` : ''}
+        ${c.ai ? `<div class="detail-text"><b>AI summary (advice only)</b>, leans ${esc({ pay_seller: 'seller', refund_buyer: 'buyer', needs_human: 'unclear' }[c.ai.recommendation])}, ${esc(c.ai.confidence)} confidence: ${esc(c.ai.summary)}</div>` : ''}
         <span class="when">${c.evidence.length} evidence item${c.evidence.length === 1 ? '' : 's'}${c.resolution ? ' · ' + esc(c.resolution) : ''}</span></div>
       <div class="side"><span class="status ${c.status === 'resolved' ? 'completed' : 'disputed'}">${esc(c.status)}</span>
         ${c.status !== 'resolved' ? `<button class="btn ghost sm" data-ai="${c.id}">Run AI review</button><button class="btn success sm" data-pay="${c.id}">Pay seller</button><button class="btn danger sm" data-cref="${c.id}">Refund buyer</button>` : ''}</div></div>`).join('') || '<p class="muted">No cases.</p>',
@@ -1178,6 +1185,8 @@ async function adminPage() {
       if (!r) return false;
       return api(`/admin/listings/${b.dataset.removeListing}/remove`, { reason: r.text, revoke_access: r.checked });
     });
+    act('[data-img-ok]', async (b) => (await confirmBox('Approve this image?', 'It becomes visible again.', 'Approve', 'success')) && api(`/admin/image-checks/${b.dataset.imgOk}/decide`, { decision: 'approve' }));
+    act('[data-img-rm]', async (b) => (await confirmBox('Remove this image?', 'The listing is taken down, or the file stays hidden.', 'Remove')) && api(`/admin/image-checks/${b.dataset.imgRm}/decide`, { decision: 'remove' }));
     act('[data-ai]', async (b) => api(`/admin/cases/${b.dataset.ai}/ai-review`, {}));
     act('[data-pay]', async (b) => (await confirmBox('Pay the seller?', 'Closes the case and releases the seller’s earnings.', 'Pay seller', 'success')) && api(`/admin/cases/${b.dataset.pay}/resolve`, { decision: 'pay_seller' }));
     act('[data-cref]', async (b) => (await confirmBox('Refund the buyer?', 'Closes the case, refunds the buyer in full and reverses the seller’s earnings.', 'Refund buyer')) && api(`/admin/cases/${b.dataset.cref}/resolve`, { decision: 'refund_buyer' }));
