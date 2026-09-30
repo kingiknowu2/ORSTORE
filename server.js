@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { createSandboxProvider } = require('./payments');
+const ai = require('./ai-review');
 
 const PORT = process.env.PORT || 3000;
 const FEE_RATE = 0.10;       // Lootrova keeps 10% of every successful sale, taken from the seller's share
@@ -23,6 +24,10 @@ const FILES_DIR = process.env.FILES_DIR || path.join(__dirname, 'storage', 'file
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(FILES_DIR, { recursive: true });
 
+// Launch catalogue: Roblox experiences only. New games are added here.
+const GAMES = ['Pet Simulator 99', 'Steal a Brainrot', 'Jailbreak', 'Blox Fruits'];
+const MIN_SALES_FOR_DELIVERY_STAT = 4;
+const ONLINE_TIMEOUT_MS = 5 * 60 * 1000;
 const LICENCES = {
   personal: 'Personal use: for the buyer’s own use only. No resale or redistribution.',
   commercial: 'Commercial use: may be used in the buyer’s own commercial projects. The files themselves may not be resold or redistributed.',
@@ -39,7 +44,7 @@ const REPORT_CATEGORIES = {
   not_working: 'Item doesn’t work as described',
   other: 'Something else',
 };
-const ALLOWED_FILE_TYPES = ['zip', '7z', 'rar', 'pdf', 'txt', 'md', 'json', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif',
+const ALLOWED_FILE_TYPES = ['mov', 'zip', '7z', 'rar', 'pdf', 'txt', 'md', 'json', 'csv', 'png', 'jpg', 'jpeg', 'webp', 'gif',
   'mp3', 'wav', 'ogg', 'flac', 'mp4', 'webm', 'ttf', 'otf', 'woff2', 'unitypackage', 'blend', 'fbx', 'obj', 'glb', 'gltf',
   'psd', 'pak', 'mcpack', 'mcworld', 'mcaddon', 'rbxm', 'rbxl'];
 const PAID_STATES = ['paid', 'completed', 'disputed']; // states that grant the buyer access
@@ -93,6 +98,14 @@ CREATE TABLE IF NOT EXISTS order_messages (
   id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, sender_id INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS follows (
   follower_id INTEGER NOT NULL, followee_id INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (follower_id, followee_id));
+CREATE TABLE IF NOT EXISTS cases (
+  id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL UNIQUE, opened_by TEXT NOT NULL, reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open', -- open | reviewing | resolved
+  ai_recommendation TEXT, ai_confidence TEXT, ai_summary TEXT, ai_details TEXT, ai_reviewed_at TEXT,
+  resolution TEXT, resolved_at TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS case_evidence (
+  id INTEGER PRIMARY KEY, case_id INTEGER NOT NULL, user_id INTEGER NOT NULL, file_id INTEGER, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS presence_sessions (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, started_at TEXT NOT NULL, ended_at TEXT);
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT NOT NULL, email TEXT NOT NULL, subject TEXT NOT NULL,
   message TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -112,6 +125,10 @@ addColumn('listings', 'revoke_access INTEGER NOT NULL DEFAULT 0');
 addColumn('listings', 'updated_at TEXT');
 addColumn('listings', `buyer_info_label TEXT NOT NULL DEFAULT ''`);
 addColumn('orders', 'buyer_info TEXT');
+for (const col of ['seller_delivered_at', 'buyer_confirmed_at', 'listing_snapshot']) addColumn('orders', `${col} TEXT`);
+addColumn('orders', 'delivery_file_id INTEGER');
+addColumn('users', 'online INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'last_seen_at TEXT');
 for (const col of ['product_title', 'currency', 'email', 'consent_at', 'payment_intent_id', 'receipt_no', 'card_brand', 'card_last4',
   'paid_at', 'available_at', 'released_at', 'refunded_at', 'dispute_reason', 'dispute_at', 'note']) addColumn('orders', `${col} TEXT`);
 addColumn('orders', 'buyer_fee_cents INTEGER NOT NULL DEFAULT 0');
@@ -186,6 +203,7 @@ function fulfilOrder(orderId) {
     if (!r.changes) return;
     db.prepare(`UPDATE listings SET sold_count = sold_count + 1,
       status = CASE WHEN stock IS NOT NULL AND sold_count + 1 >= stock THEN 'sold' ELSE status END WHERE id = ?`).run(listing.id);
+    db.prepare('UPDATE orders SET listing_snapshot = ? WHERE id = ?').run(JSON.stringify({ game: listing.game, title: listing.title, description: listing.description, delivers: listing.delivers, compatibility: listing.compatibility, requirements: listing.requirements, price_cents: listing.price_cents }), order.id);
     ledgerAdd({ type: 'purchase', order_id: order.id, user_id: order.buyer_id, bucket: 'buyer', amount: order.total_cents, memo: `Payment ${intent.id}` });
     ledgerAdd({ type: 'platform_fee', order_id: order.id, bucket: 'platform', amount: order.fee_cents + order.buyer_fee_cents, memo: `${FEE_RATE * 100}% platform fee` });
     ledgerAdd({ type: 'seller_earning', order_id: order.id, user_id: order.seller_id, bucket: 'pending', amount: net, memo: 'Held until release' });
@@ -204,8 +222,86 @@ function releaseOrder(orderId) {
   });
 }
 // Pending earnings become available once the hold period ends, unless the order is disputed.
+// At the deadline, an order only pays out if both sides confirmed; otherwise it becomes a case.
 function releaseDue() {
-  for (const o of db.prepare(`SELECT id FROM orders WHERE status = 'paid' AND released_at IS NULL AND available_at <= ?`).all(nowIso())) releaseOrder(o.id);
+  for (const o of db.prepare(`SELECT * FROM orders WHERE status = 'paid' AND released_at IS NULL AND available_at <= ?`).all(nowIso())) {
+    if (o.seller_delivered_at && o.buyer_confirmed_at) releaseOrder(o.id);
+    else openCase(o.id, 'system', !o.seller_delivered_at && !o.buyer_confirmed_at ? 'Neither side confirmed the trade before the deadline.'
+      : !o.seller_delivered_at ? 'The seller did not confirm delivery before the deadline.' : 'The buyer did not confirm receipt before the deadline.');
+  }
+}
+// Releases earnings once both the seller (delivered) and buyer (received) have confirmed.
+function releaseIfBothConfirmed(orderId) {
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  if (o.seller_delivered_at && o.buyer_confirmed_at && ['paid', 'disputed'].includes(o.status)) {
+    releaseOrder(o.id);
+    db.prepare(`UPDATE cases SET status = 'resolved', resolution = 'Both sides confirmed', resolved_at = ? WHERE order_id = ? AND status != 'resolved'`).run(nowIso(), o.id);
+  }
+}
+function openCase(orderId, openedBy, reason) {
+  db.prepare(`UPDATE orders SET status = 'disputed', dispute_reason = COALESCE(dispute_reason, ?), dispute_at = COALESCE(dispute_at, ?) WHERE id = ? AND status IN ('paid', 'disputed')`)
+    .run(reason, nowIso(), orderId);
+  const r = db.prepare('INSERT OR IGNORE INTO cases (order_id, opened_by, reason, created_at) VALUES (?, ?, ?, ?)').run(orderId, openedBy, reason, nowIso());
+  const c = db.prepare('SELECT id FROM cases WHERE order_id = ?').get(orderId);
+  if (r.changes) runAiReview(c.id).catch((e) => console.error('AI review failed', e.message));
+  return c.id;
+}
+function caseData(caseId) {
+  const c = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId);
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(c.order_id);
+  const who = (id) => (id === o.buyer_id ? 'buyer' : id === o.seller_id ? 'seller' : 'support');
+  return {
+    case: c,
+    order: { id: o.id, status: o.status, price: o.price_cents / 100, buyer_info: o.buyer_info, paid_at: o.paid_at,
+      seller_delivered_at: o.seller_delivered_at, buyer_confirmed_at: o.buyer_confirmed_at, case_reason: c.reason },
+    listing: JSON.parse(o.listing_snapshot || 'null'),
+    messages: db.prepare('SELECT sender_id, body, created_at FROM order_messages WHERE order_id = ? ORDER BY id').all(o.id).map((m) => ({ from: who(m.sender_id), at: m.created_at, text: m.body })),
+    evidence: [
+      ...(o.delivery_file_id ? [{ by: 'seller', note: 'Trade recording uploaded when marking delivered', file_id: o.delivery_file_id, at: o.seller_delivered_at }] : []),
+      ...db.prepare('SELECT * FROM case_evidence WHERE case_id = ? ORDER BY id').all(c.id).map((e) => ({ by: who(e.user_id), note: e.note, file_id: e.file_id, at: e.created_at })),
+    ].map((e) => {
+      const f = e.file_id && db.prepare('SELECT * FROM files WHERE id = ?').get(e.file_id);
+      return { ...e, file: f ? { id: f.id, name: f.original_name, ext: f.ext, size: f.size, path: path.join(FILES_DIR, path.basename(f.stored_name)) } : null };
+    }),
+  };
+}
+async function runAiReview(caseId) {
+  if (!ai.enabled()) return false;
+  db.prepare(`UPDATE cases SET status = 'reviewing' WHERE id = ? AND status = 'open'`).run(caseId);
+  const v = await ai.reviewCase(caseData(caseId));
+  db.prepare(`UPDATE cases SET ai_recommendation = ?, ai_confidence = ?, ai_summary = ?, ai_details = ?, ai_reviewed_at = ?,
+    status = CASE WHEN status = 'reviewing' THEN 'open' ELSE status END WHERE id = ?`)
+    .run(v.recommendation, v.confidence, v.summary, JSON.stringify({ key_evidence: v.key_evidence, missing_evidence: v.missing_evidence }), nowIso(), caseId);
+  return true;
+}
+function caseView(caseId, forUser) {
+  const d = caseData(caseId);
+  return {
+    id: d.case.id, status: d.case.status, reason: d.case.reason, opened_by: d.case.opened_by, created_at: d.case.created_at,
+    ai: d.case.ai_reviewed_at ? { recommendation: d.case.ai_recommendation, confidence: d.case.ai_confidence, summary: d.case.ai_summary, ...JSON.parse(d.case.ai_details || '{}'), at: d.case.ai_reviewed_at } : null,
+    ai_enabled: ai.enabled(), resolution: d.case.resolution, resolved_at: d.case.resolved_at,
+    evidence: d.evidence.map((e) => ({ by: e.by, note: e.note, at: e.at, file: e.file && { id: e.file.id, name: e.file.name, ext: e.file.ext, size: e.file.size, url: `/evidence/${e.file.id}` } })),
+    ...(forUser?.role === 'admin' ? { listing_at_purchase: d.listing } : {}),
+  };
+}
+// Online status: a seller is online when they switched it on and were active in the last few minutes.
+function presence(userId) {
+  const u = db.prepare('SELECT online, last_seen_at FROM users WHERE id = ?').get(userId);
+  const fresh = u.last_seen_at && Date.now() - new Date(u.last_seen_at) < ONLINE_TIMEOUT_MS;
+  if (u.online && !fresh) {
+    db.prepare('UPDATE presence_sessions SET ended_at = ? WHERE user_id = ? AND ended_at IS NULL').run(u.last_seen_at || nowIso(), userId);
+    db.prepare('UPDATE users SET online = 0 WHERE id = ?').run(userId);
+  }
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const ms = db.prepare('SELECT started_at, ended_at FROM presence_sessions WHERE user_id = ? AND (ended_at IS NULL OR ended_at > ?)').all(userId, since)
+    .reduce((t, s) => t + (new Date(s.ended_at || nowIso()) - new Date(s.started_at < since ? since : s.started_at)), 0);
+  return { online: !!(u.online && fresh), last_seen_at: u.last_seen_at, avg_online_hours_per_day: Math.round((ms / 3600000 / 30) * 10) / 10 };
+}
+function deliveryStats(userId) {
+  const rows = db.prepare(`SELECT paid_at, seller_delivered_at FROM orders WHERE seller_id = ? AND seller_delivered_at IS NOT NULL AND paid_at IS NOT NULL`).all(userId);
+  if (rows.length < MIN_SALES_FOR_DELIVERY_STAT) return { avg_delivery_minutes: null, delivered: rows.length, needed: MIN_SALES_FOR_DELIVERY_STAT };
+  const avg = rows.reduce((t, r) => t + (new Date(r.seller_delivered_at) - new Date(r.paid_at)), 0) / rows.length / 60000;
+  return { avg_delivery_minutes: Math.max(1, Math.round(avg)), delivered: rows.length, needed: MIN_SALES_FOR_DELIVERY_STAT };
 }
 setInterval(releaseDue, 10 * 60 * 1000).unref();
 
@@ -221,6 +317,8 @@ function reverseOrder(order, kind, memo) {
       .run(kind === 'refund' ? 'refunded' : 'chargeback', nowIso(), memo, order.id);
     if (!r.changes) return;
     ledgerAdd({ type: kind, order_id: order.id, user_id: order.buyer_id, bucket: 'buyer', amount: -order.total_cents, memo });
+    db.prepare(`UPDATE cases SET status = 'resolved', resolution = COALESCE(resolution, ?), resolved_at = ? WHERE order_id = ? AND status != 'resolved'`)
+      .run(kind === 'refund' ? 'Buyer refunded' : 'Charged back', nowIso(), order.id);
     ledgerAdd({ type: 'fee_reversal', order_id: order.id, bucket: 'platform', amount: -(order.fee_cents + order.buyer_fee_cents), memo });
     ledgerAdd({ type: 'earning_reversal', order_id: order.id, user_id: order.seller_id, bucket: order.released_at ? 'available' : 'pending',
       amount: -(order.price_cents - order.fee_cents), memo });
@@ -361,6 +459,7 @@ function validateListing(b, user, existing) {
   };
   const missing = [];
   if (!f.game) missing.push('game');
+  else if (!GAMES.includes(f.game)) throw httpError(400, `Choose one of the supported Roblox games: ${GAMES.join(', ')}.`);
   if (!f.title) missing.push('item name');
   if (!f.description) missing.push('description');
   if (!f.delivers) missing.push('what the buyer receives');
@@ -409,6 +508,7 @@ function orderView(o, forAdmin = false) {
     access_note: l.revoke_access ? 'This item was removed for breaking marketplace rules, so downloads are disabled.' : o.note,
     dispute_reason: o.dispute_reason, available_at: o.available_at, released_at: o.released_at,
     buyer_info: o.buyer_info, buyer_info_label: l.buyer_info_label, messages: msgCount(o.id),
+    seller_delivered_at: o.seller_delivered_at, buyer_confirmed_at: o.buyer_confirmed_at, has_case: !!db.prepare('SELECT 1 FROM cases WHERE order_id = ?').get(o.id),
     rated: !!db.prepare('SELECT 1 FROM ratings WHERE order_id = ?').get(o.id),
     last_payment_error: lastAttempt?.status === 'failed' ? lastAttempt.message : null,
     ...(forAdmin ? { fee_cents: o.fee_cents, payment_intent_id: o.payment_intent_id, buyer_id: o.buyer_id, seller_id: o.seller_id } : {}),
@@ -423,6 +523,7 @@ function saleView(o) {
     price_cents: o.price_cents, fee_cents: o.fee_cents, net_cents: o.price_cents - o.fee_cents, paid_at: o.paid_at,
     available_at: o.available_at, released_at: o.released_at, refunded_at: o.refunded_at, dispute_reason: o.dispute_reason,
     buyer_info: o.buyer_info, buyer_info_label: db.prepare('SELECT buyer_info_label FROM listings WHERE id = ?').get(o.listing_id).buyer_info_label, messages: msgCount(o.id),
+    seller_delivered_at: o.seller_delivered_at, buyer_confirmed_at: o.buyer_confirmed_at, has_case: !!db.prepare('SELECT 1 FROM cases WHERE order_id = ?').get(o.id),
   };
 }
 const getOrderFor = (id, user, role) => {
@@ -436,6 +537,7 @@ const getOrderFor = (id, user, role) => {
 // ---------- API routes ----------
 const routes = {
   'GET /api/config': (req, res) => send(res, 200, {
+    games: GAMES, platform: 'Roblox', ai_review: ai.enabled(), min_sales_for_delivery_stat: MIN_SALES_FOR_DELIVERY_STAT,
     currency: CURRENCY, fee_rate: FEE_RATE, buyer_fee_cents: BUYER_FEE_CENTS, hold_days: HOLD_DAYS, min_payout_cents: MIN_PAYOUT_CENTS,
     test_mode: payments.testMode, test_cards: payments.testCards, licences: LICENCES, report_categories: REPORT_CATEGORIES,
     allowed_file_types: ALLOWED_FILE_TYPES, max_file_mb: MAX_FILE_BYTES / 1024 / 1024, support_email: process.env.SUPPORT_EMAIL || null,
@@ -467,8 +569,8 @@ const routes = {
     send(res, 200, { ok: true });
   },
   'GET /api/me': (req, res, user) => {
-    if (user) releaseDue();
-    send(res, 200, { user: user && { ...user, balance_cents: balance(user.id, 'available') } });
+    if (user) { releaseDue(); db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(nowIso(), user.id); }
+    send(res, 200, { user: user && { ...user, balance_cents: balance(user.id, 'available'), presence: presence(user.id) } });
   },
 
   'GET /api/listings': (req, res, user, url) => {
@@ -631,7 +733,8 @@ const routes = {
     const b = await readBody(req);
     const o = getOrderFor(id, user, 'buyer');
     if (o.buyer_id !== user.id || !PAID_STATES.includes(o.status)) return send(res, 400, { error: 'This order can’t be confirmed.' });
-    releaseOrder(o.id);
+    db.prepare('UPDATE orders SET buyer_confirmed_at = COALESCE(buyer_confirmed_at, ?) WHERE id = ?').run(nowIso(), o.id);
+    releaseIfBothConfirmed(o.id);
     const stars = Math.min(5, Math.max(1, parseInt(b.stars, 10) || 5));
     db.prepare('INSERT OR REPLACE INTO ratings (order_id, seller_id, stars, comment) VALUES (?,?,?,?)').run(o.id, o.seller_id, stars, str(b.comment, 500));
     send(res, 200, { ok: true });
@@ -645,10 +748,83 @@ const routes = {
     if (reason.length < 10) return send(res, 400, { error: 'Please explain what went wrong (at least 10 characters).' });
     const r = db.prepare(`UPDATE orders SET status = 'disputed', dispute_reason = ?, dispute_at = ? WHERE id = ? AND status = 'paid'`)
       .run(reason, nowIso(), o.id);
+    if (r.changes) openCase(o.id, 'buyer', reason);
     if (!r.changes) {
       return send(res, 400, { error: o.status === 'disputed' ? 'You already asked for a refund on this order.'
         : 'Refund requests can be opened during the protection period. Please contact support about this order.' });
     }
+    send(res, 200, { ok: true });
+  },
+  // Seller confirms delivery with a screen recording of the trade.
+  'POST /api/orders/:id/deliver': async (req, res, user, url, id) => {
+    requireUser(user);
+    const b = await readBody(req);
+    const o = getOrderFor(id, user, 'seller');
+    if (o.seller_id !== user.id) return send(res, 403, { error: 'Only the seller can confirm delivery.' });
+    if (!['paid', 'disputed'].includes(o.status)) return send(res, 400, { error: 'This order can’t be marked as delivered.' });
+    if (b.recorded !== true) return send(res, 400, { error: 'Confirm you read the rules and recorded the whole trade.' });
+    const f = db.prepare('SELECT * FROM files WHERE id = ? AND owner_id = ?').get(Number(b.file_id), user.id);
+    if (!f || !['mp4', 'webm', 'mov', 'png', 'jpg', 'jpeg', 'webp'].includes(f.ext)) return send(res, 400, { error: 'Upload your trade recording (MP4, WebM or MOV) before confirming delivery.' });
+    db.prepare('UPDATE orders SET seller_delivered_at = COALESCE(seller_delivered_at, ?), delivery_file_id = ? WHERE id = ?').run(nowIso(), f.id, o.id);
+    releaseIfBothConfirmed(o.id);
+    send(res, 200, { ok: true });
+  },
+  'GET /api/orders/:id/case': (req, res, user, url, id) => {
+    requireUser(user);
+    const o = getOrderFor(id, user);
+    const c = db.prepare('SELECT id FROM cases WHERE order_id = ?').get(o.id);
+    send(res, 200, { case: c ? caseView(c.id, user) : null });
+  },
+  'POST /api/orders/:id/evidence': async (req, res, user, url, id) => {
+    requireUser(user);
+    const b = await readBody(req);
+    const o = getOrderFor(id, user);
+    const c = db.prepare('SELECT * FROM cases WHERE order_id = ?').get(o.id);
+    if (!c || c.status === 'resolved') return send(res, 400, { error: 'There’s no open case on this order.' });
+    const note = str(b.note, 2000);
+    const f = b.file_id ? db.prepare('SELECT id FROM files WHERE id = ? AND owner_id = ?').get(Number(b.file_id), user.id) : null;
+    if (b.file_id && !f) return send(res, 400, { error: 'Upload the file again.' });
+    if (!note && !f) return send(res, 400, { error: 'Add a note or a file.' });
+    db.prepare('INSERT INTO case_evidence (case_id, user_id, file_id, note, created_at) VALUES (?, ?, ?, ?, ?)').run(c.id, user.id, f?.id ?? null, note, nowIso());
+    send(res, 200, { ok: true });
+  },
+  'POST /api/presence': async (req, res, user) => {
+    requireUser(user);
+    const b = await readBody(req);
+    const want = b.online === true;
+    const cur = presence(user.id).online;
+    db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(nowIso(), user.id);
+    if (want && !cur) {
+      db.prepare('UPDATE users SET online = 1 WHERE id = ?').run(user.id);
+      db.prepare('INSERT INTO presence_sessions (user_id, started_at) VALUES (?, ?)').run(user.id, nowIso());
+    } else if (!want && cur) {
+      db.prepare('UPDATE users SET online = 0 WHERE id = ?').run(user.id);
+      db.prepare('UPDATE presence_sessions SET ended_at = ? WHERE user_id = ? AND ended_at IS NULL').run(nowIso(), user.id);
+    }
+    send(res, 200, { presence: presence(user.id) });
+  },
+  'GET /api/admin/cases': (req, res, user) => {
+    requireAdmin(user);
+    send(res, 200, { cases: db.prepare('SELECT id, order_id FROM cases ORDER BY status = \'resolved\', id DESC LIMIT 200').all()
+      .map((c) => ({ ...caseView(c.id, user), order: orderView(db.prepare('SELECT * FROM orders WHERE id = ?').get(c.order_id), true) })) });
+  },
+  'POST /api/admin/cases/:id/ai-review': async (req, res, user, url, id) => {
+    requireAdmin(user);
+    if (!ai.enabled()) return send(res, 400, { error: 'AI review is off. Set ANTHROPIC_API_KEY on the server to turn it on.' });
+    try { await runAiReview(id); } catch (e) { return send(res, 502, { error: 'AI review failed: ' + e.message }); }
+    send(res, 200, { case: caseView(id, user) });
+  },
+  'POST /api/admin/cases/:id/resolve': async (req, res, user, url, id) => {
+    requireAdmin(user);
+    const b = await readBody(req);
+    const c = db.prepare('SELECT * FROM cases WHERE id = ?').get(id);
+    if (!c || c.status === 'resolved') return send(res, 400, { error: 'This case is already resolved.' });
+    const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(c.order_id);
+    if (b.decision === 'refund_buyer') reverseOrder(o, 'refund', 'Refunded after case review');
+    else if (b.decision === 'pay_seller') { db.prepare(`UPDATE orders SET status = 'paid' WHERE id = ? AND status = 'disputed'`).run(o.id); releaseOrder(o.id); }
+    else return send(res, 400, { error: 'Choose refund_buyer or pay_seller.' });
+    db.prepare(`UPDATE cases SET status = 'resolved', resolution = ?, resolved_at = ? WHERE id = ?`)
+      .run((b.decision === 'refund_buyer' ? 'Buyer refunded' : 'Seller paid') + (str(b.note, 500) ? ': ' + str(b.note, 500) : ''), nowIso(), id);
     send(res, 200, { ok: true });
   },
   // The seller can refund their own sale; admins can refund any paid order.
@@ -693,6 +869,7 @@ const routes = {
         is_following: !!(user && db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?').get(user.id, u.id)),
         sales: count(`SELECT COUNT(*) AS n FROM orders WHERE seller_id = ? AND status IN ('paid', 'completed', 'disputed')`),
         rating: db.prepare('SELECT ROUND(AVG(stars),1) AS r, COUNT(*) AS n FROM ratings WHERE seller_id = ?').get(u.id),
+        presence: presence(u.id), delivery: deliveryStats(u.id),
       },
       listings: db.prepare(LISTING_SELECT + ` WHERE l.seller_id = ? AND l.status = 'active' AND l.file_id IS NOT NULL ORDER BY l.id DESC`).all(u.id).map(parseImages),
     });
@@ -885,6 +1062,20 @@ function deniedPage(res, code, title, text) {
 <p class="switch"><a href="/#/contact">Contact support</a></p></div></div></main></body></html>`);
 }
 // Every download is checked against the logged-in buyer and the order's payment state.
+// Case evidence is visible only to the order's buyer, seller and admins.
+function handleEvidence(res, user, fileId) {
+  if (!user) return deniedPage(res, 401, 'Log in required', 'Log in to view case evidence.');
+  const f = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId);
+  const orders = f && db.prepare(`SELECT o.buyer_id, o.seller_id FROM orders o LEFT JOIN cases c ON c.order_id = o.id LEFT JOIN case_evidence e ON e.case_id = c.id
+    WHERE o.delivery_file_id = ? OR e.file_id = ?`).all(fileId, fileId);
+  if (!f || !orders.length || !(user.role === 'admin' || orders.some((o) => o.buyer_id === user.id || o.seller_id === user.id))) {
+    return deniedPage(res, 403, 'Access denied', 'Only people involved in this order can view its evidence.');
+  }
+  const types = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+  res.writeHead(200, { 'Content-Type': types[f.ext] || 'application/octet-stream', 'Cache-Control': 'private, no-store',
+    ...(types[f.ext] ? {} : { 'Content-Disposition': 'attachment' }) });
+  fs.createReadStream(path.join(FILES_DIR, path.basename(f.stored_name))).pipe(res);
+}
 function handleDownload(req, res, user, orderId) {
   if (!user) {
     res.writeHead(302, { Location: `/#/login?next=${encodeURIComponent('/download/' + orderId)}` });
@@ -913,6 +1104,8 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Referrer-Policy', 'same-origin');
   const url = new URL(req.url, 'http://x');
   try {
+    const ev = /^\/evidence\/(\d+)$/.exec(url.pathname);
+    if (ev && req.method === 'GET') return handleEvidence(res, currentUser(req), Number(ev[1]));
     const dl = /^\/download\/(\d+)$/.exec(url.pathname);
     if (dl && req.method === 'GET') return handleDownload(req, res, currentUser(req), Number(dl[1]));
 

@@ -61,7 +61,7 @@ async function listItem(seller, over = {}) {
   const file = await seller.upload(over.fileName || 'pack.zip', Buffer.from('PK\x03\x04 test product ' + Math.random()));
   assert.equal(file.status, 200, JSON.stringify(file.data));
   const r = await seller.post('/api/listings', {
-    game: 'CS2', title: 'Test Pack', description: 'A test product.', delivers: 'One ZIP with 20 skins', compatibility: 'Windows, CS2',
+    game: 'Blox Fruits', title: 'Test Pack', description: 'A test product.', delivers: 'One ZIP with 20 skins', compatibility: 'Windows, CS2',
     requirements: '', licence: 'personal', price: '10', copies: 'unlimited', file_id: file.data.id, usable: true, owns_rights: true, ...over,
   });
   assert.equal(r.status, 200, JSON.stringify(r.data));
@@ -73,6 +73,11 @@ async function pay(buyer, listingId, card = CARD_OK, extra = {}) {
   const conf = await buyer.post(`/provider/sandbox/payment_intents/${co.data.payment.intent_id}/confirm`, { client_secret: co.data.payment.client_secret, card });
   const sync = await buyer.post(`/api/orders/${co.data.order.id}/sync`, {});
   return { checkout: co, confirm: conf, order: sync.data.order };
+}
+async function deliver(seller, orderId) {
+  const rec = await seller.upload('trade-recording.mp4', Buffer.from('fake mp4 recording ' + orderId));
+  const r = await seller.post(`/api/orders/${orderId}/deliver`, { file_id: rec.data.id, recorded: true });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
 }
 const dash = async (c) => (await c.get('/api/dashboard')).data;
 const db = () => new DatabaseSync(DB_PATH);
@@ -89,7 +94,7 @@ test('setup accounts', async () => {
 
 test('Flow 12: listing needs all required info and ownership confirmation', async () => {
   const file = await seller.upload('pack.zip', Buffer.from('PK test'));
-  const base = { game: 'CS2', title: 'Pack', description: 'Desc', delivers: 'ZIP', compatibility: 'PC', licence: 'personal', price: '5', file_id: file.data.id, usable: true, owns_rights: true };
+  const base = { game: 'Blox Fruits', title: 'Pack', description: 'Desc', delivers: 'ZIP', compatibility: 'PC', licence: 'personal', price: '5', file_id: file.data.id, usable: true, owns_rights: true };
   let r = await seller.post('/api/listings', { ...base, delivers: '', compatibility: '' });
   assert.equal(r.status, 400);
   assert.match(r.data.error, /what the buyer receives/);
@@ -204,6 +209,7 @@ test('Flow 6: seller dashboard shows gross, fee, earnings and balances for a 10.
   assert.ok(new Date(sale.available_at) > new Date(), 'earnings have a future release date');
 
   // Buyer confirms the item works: earnings move from pending to available, then the seller cashes out.
+  await deliver(s, order.id);
   assert.equal((await b.post(`/api/orders/${order.id}/confirm`, { stars: 5 })).status, 200);
   assert.deepEqual((await dash(s)).balances, { pending_cents: 0, available_cents: 900 });
   const p = await s.post('/api/payouts', {});
@@ -247,6 +253,7 @@ test('chargebacks reverse released earnings', async () => {
   const s = await user('cb_seller');
   const b = await user('cb_buyer');
   const { order } = await pay(b, await listItem(s, { price: '10' }));
+  await deliver(s, order.id);
   await b.post(`/api/orders/${order.id}/confirm`, { stars: 4 });
   assert.equal((await dash(s)).balances.available_cents, 900);
   assert.equal((await s.post(`/api/admin/orders/${order.id}/chargeback`, {})).status, 403);
@@ -257,6 +264,7 @@ test('chargebacks reverse released earnings', async () => {
 
   // A chargeback after the money was paid out leaves the seller owing it (negative balance).
   const second = await pay(b, await listItem(s, { price: '10' }));
+  await deliver(s, second.order.id);
   await b.post(`/api/orders/${second.order.id}/confirm`, { stars: 5 });
   assert.equal((await s.post('/api/payouts', {})).status, 200);
   await admin.post(`/api/admin/orders/${second.order.id}/chargeback`, {});
@@ -441,4 +449,77 @@ test('members can follow each other and see a feed', async () => {
   assert.equal((await f.get('/api/feed')).data.listings.length, 0);
   assert.equal((await client().post('/api/follow', { username: 'follow_seller' })).status, 401);
   assert.equal((await f.get('/api/profile?u=nobody_here')).status, 404);
+});
+
+test('only supported Roblox games can be listed', async () => {
+  const s = await user('game_seller');
+  const file = await s.upload('x.zip', Buffer.from('PK'));
+  const r = await s.post('/api/listings', { game: 'CS2', title: 't', description: 'd', delivers: 'd', compatibility: 'c', licence: 'personal', price: '5', file_id: file.data.id, usable: true, owns_rights: true });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /Pet Simulator 99/);
+  assert.deepEqual((await s.get('/api/config')).data.games, ['Pet Simulator 99', 'Steal a Brainrot', 'Jailbreak', 'Blox Fruits']);
+});
+
+test('both sides must confirm: seller delivery needs a recording, buyer alone does not release money', async () => {
+  const s = await user('both_seller');
+  const b = await user('both_buyer');
+  const { order } = await pay(b, await listItem(s, { price: '10' }));
+  assert.equal((await b.post(`/api/orders/${order.id}/confirm`, { stars: 5 })).status, 200);
+  assert.deepEqual((await dash(s)).balances, { pending_cents: 900, available_cents: 0 }, 'buyer confirmation alone does not pay out');
+  assert.equal((await s.post(`/api/orders/${order.id}/deliver`, { recorded: true })).status, 400, 'recording required');
+  const rec = await s.upload('rec.mp4', Buffer.from('video'));
+  assert.equal((await s.post(`/api/orders/${order.id}/deliver`, { file_id: rec.data.id })).status, 400, 'must acknowledge the rules');
+  assert.equal((await b.post(`/api/orders/${order.id}/deliver`, { file_id: rec.data.id, recorded: true })).status, 404, 'buyer cannot mark delivered');
+  await deliver(s, order.id);
+  assert.deepEqual((await dash(s)).balances, { pending_cents: 0, available_cents: 900 }, 'released once both confirmed');
+  const o = (await b.get(`/api/orders/${order.id}`)).data.order;
+  assert.ok(o.seller_delivered_at && o.buyer_confirmed_at);
+});
+
+test('missing confirmations open a case with evidence; admin resolves it', async () => {
+  const s = await user('case_seller');
+  const b = await user('case_buyer');
+  const { order } = await pay(b, await listItem(s, { price: '10' }));
+  await deliver(s, order.id);
+  // Simulate the deadline passing without the buyer confirming.
+  db().prepare('UPDATE orders SET available_at = ? WHERE id = ?').run('2000-01-01T00:00:00.000Z', order.id);
+  await s.get('/api/me');
+  const c = (await b.get(`/api/orders/${order.id}/case`)).data.case;
+  assert.ok(c, 'case opened automatically');
+  assert.match(c.reason, /buyer did not confirm/);
+  assert.equal(c.evidence[0].by, 'seller', 'seller recording is included as evidence');
+  assert.equal((await b.get(`/api/orders/${order.id}`)).data.order.status, 'disputed');
+  assert.equal((await b.post(`/api/orders/${order.id}/evidence`, { note: 'I never got the item in game.' })).status, 200);
+  assert.equal((await buyerB.post(`/api/orders/${order.id}/evidence`, { note: 'x' })).status, 404);
+  const evUrl = c.evidence[0].file.url;
+  assert.equal((await b.get(evUrl)).status, 200, 'buyer can view seller recording');
+  assert.equal((await buyerB.get(evUrl)).status, 403, 'outsiders cannot');
+  const cases = (await admin.get('/api/admin/cases')).data.cases;
+  const mine = cases.find((x) => x.order.id === order.id);
+  assert.equal(mine.evidence.length, 2);
+  assert.equal((await b.post(`/api/admin/cases/${mine.id}/resolve`, { decision: 'pay_seller' })).status, 403);
+  assert.equal((await admin.post(`/api/admin/cases/${mine.id}/resolve`, { decision: 'pay_seller' })).status, 200);
+  assert.deepEqual((await dash(s)).balances, { pending_cents: 0, available_cents: 900 });
+});
+
+test('seller online status and delivery average after 4 sales', async () => {
+  const s = await user('speedy_seller');
+  let p = (await s.get('/api/profile?u=speedy_seller')).data.profile;
+  assert.equal(p.presence.online, false);
+  assert.equal((await s.post('/api/presence', { online: true })).data.presence.online, true);
+  p = (await client().get('/api/profile?u=speedy_seller')).data.profile;
+  assert.equal(p.presence.online, true);
+  assert.equal(p.delivery.avg_delivery_minutes, null, 'hidden before 4 sales');
+  const b = await user('speedy_buyer');
+  const id = await listItem(s, { price: '1' });
+  for (let i = 0; i < 4; i++) {
+    const { order } = await pay(b, await listItem(s, { price: '1', title: 'Speed ' + i }));
+    await deliver(s, order.id);
+    if (i < 3) assert.equal((await client().get('/api/profile?u=speedy_seller')).data.profile.delivery.avg_delivery_minutes, null);
+  }
+  const d = (await client().get('/api/profile?u=speedy_seller')).data.profile.delivery;
+  assert.equal(d.delivered, 4);
+  assert.ok(d.avg_delivery_minutes >= 1);
+  assert.equal((await s.post('/api/presence', { online: false })).data.presence.online, false);
+  assert.ok(id);
 });

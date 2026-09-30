@@ -135,7 +135,7 @@ function modal(html, onMount) {
 const LABELS = ['', 'Poor', 'Fair', 'Good', 'Great', 'Excellent'];
 const askRating = (order) => modal(`
   <h2>Confirm it works</h2>
-  <p class="muted" style="margin:0">This tells us the item works and releases ${money(order.price_cents)} to <b style="color:var(--text)">${esc(order.seller)}</b> now. How was the seller?</p>
+  <p class="muted" style="margin:0">Confirm you received it. The seller is paid once you <b>and</b> <b style="color:var(--text)">${esc(order.seller)}</b> have both confirmed. How was the seller?</p>
   <div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-s="${n}" aria-label="${n} stars">${icon.star(34)}</button>`).join('')}</div>
   <div class="stars-label" id="sl">Tap to rate</div>
   <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn success" id="go" disabled>Confirm it works</button></div>`,
@@ -580,7 +580,10 @@ async function profilePage(name) {
   const { profile: p, listings } = await api('/profile?u=' + encodeURIComponent(name));
   document.title = `${p.username} — Lootrova`;
   app.innerHTML = `<div class="profile glass reveal">${avatar(p.username, 'xl')}
-      <div class="p-main"><h1>${esc(p.username)}</h1><small class="muted">Member since ${fmtDate(p.joined)}</small>
+      <div class="p-main"><h1>${esc(p.username)} <span class="pres ${p.presence.online ? 'on' : ''}"><i></i>${p.presence.online ? 'Online now' : 'Offline'}</span></h1>
+        <small class="muted">Member since ${fmtDate(p.joined)}${!p.presence.online && p.presence.last_seen_at ? ` · last seen ${fmtDateTime(p.presence.last_seen_at)}` : ''}</small>
+        <div class="p-stats" style="margin-top:6px"><span>⏱ ${p.delivery.avg_delivery_minutes != null ? `Avg delivery <b>${p.delivery.avg_delivery_minutes < 60 ? p.delivery.avg_delivery_minutes + ' min' : (p.delivery.avg_delivery_minutes / 60).toFixed(1) + ' h'}</b>` : `Avg delivery shown after ${p.delivery.needed} sales`}</span>
+          <span>🟢 Usually online <b>${p.presence.avg_online_hours_per_day} h/day</b></span></div>
         <div class="p-stats"><span><b id="fcount">${p.followers}</b> follower${p.followers === 1 ? '' : 's'}</span><span><b>${p.following}</b> following</span>
           <span><b>${p.sales}</b> sales</span><span>${p.rating.r ? `<b class="rating">★ ${p.rating.r}</b> (${p.rating.n})` : 'No ratings yet'}</span></div></div>
       ${p.is_me ? '<a class="btn ghost" href="#/dashboard">Your dashboard</a>' : `<button class="btn ${p.is_following ? 'ghost' : ''}" id="follow">${p.is_following ? 'Following ✓' : '+ Follow'}</button>`}
@@ -600,6 +603,81 @@ async function profilePage(name) {
   };
 }
 
+// ---------- Order confirmations, delivery proof and cases ----------
+async function uploadEvidence(file, onP) {
+  const up = await uploadProductFile(file, onP);
+  return up.id;
+}
+async function orderPanel(id) {
+  const box = $('#order-panel');
+  if (!box) return;
+  const [{ order: o }, { case: c }] = await Promise.all([api(`/orders/${id}/messages`), api(`/orders/${id}/case`)]);
+  const seller = o.role === 'seller', buyer = o.role === 'buyer';
+  const step = (done, label) => `<span class="cstep ${done ? 'done' : ''}">${done ? icon.check : icon.clock} ${label}</span>`;
+  const active = ['paid', 'disputed'].includes(o.status);
+  box.innerHTML = `
+    <div class="confirms">${step(o.seller_delivered_at, 'Seller confirmed delivery')}${step(o.buyer_confirmed_at, 'Buyer confirmed receipt')}</div>
+    ${active && !(o.seller_delivered_at && o.buyer_confirmed_at) ? `<p class="fine" style="margin:8px 0 0">Both sides must confirm${o.available_at ? ` by <b>${fmtDateTime(o.available_at)}</b>` : ''}. If either side doesn’t, a case opens automatically and the evidence is reviewed.</p>` : ''}
+    ${seller && active && !o.seller_delivered_at ? `
+      <div class="mustread"><h3>⚠ MUST READ before you trade</h3><ol>
+        <li><b>Record your screen for the whole trade</b>, from joining the buyer to the trade completing. Don’t stop recording early.</li>
+        <li>Show the buyer’s username${o.buyer_info ? ` (<b>${esc(o.buyer_info)}</b>)` : ''} and the items in the trade window clearly.</li>
+        <li>Only trade with the username given on this order. Never trade outside the platform or share passwords.</li>
+        <li>Upload the recording below to confirm delivery. <b>No recording means you will very likely lose a case.</b></li></ol>
+        <form id="deliver-form"><input type="file" id="rec-file" accept="video/mp4,video/webm,video/quicktime">
+          <label class="check" style="margin:12px 0"><input type="checkbox" id="rec-ack"><span>I have read the rules above and recorded the entire trade.</span></label>
+          <p class="error" id="rec-err"></p><button class="btn block" id="rec-btn">Upload recording &amp; confirm delivery</button></form></div>` : ''}
+    ${buyer && active && !o.buyer_confirmed_at ? `<div class="cta-row" style="margin-top:12px"><button class="btn success" id="buyer-confirm">${icon.check} I received it</button>
+      ${o.status === 'paid' ? `<button class="btn danger" id="buyer-problem">Something’s wrong</button>` : ''}</div>` : ''}
+    ${c ? `<div class="casebox"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h3>Case #${c.id}</h3>
+        <span class="status ${c.status === 'resolved' ? 'completed' : 'disputed'}">${c.status === 'resolved' ? 'Resolved' : 'Under review'}</span></div>
+      <p class="muted" style="margin:4px 0 10px">${esc(c.reason)}</p>
+      ${c.ai ? `<div class="ai"><b>AI evidence review</b> <span class="muted">(recommendation, a moderator makes the final decision)</span><p>${esc(c.ai.summary)}</p>
+        ${c.ai.missing_evidence?.length ? `<small class="muted">Would help: ${c.ai.missing_evidence.map(esc).join(' · ')}</small>` : ''}</div>`
+        : `<div class="ai"><b>AI evidence review</b><p class="muted">${c.ai_enabled ? 'Reviewing the evidence…' : 'Waiting for review. Add your evidence below.'}</p></div>`}
+      ${c.resolution ? `<div class="notice ok">Decision: ${esc(c.resolution)}</div>` : ''}
+      <div class="evlist">${c.evidence.map((e) => `<div class="ev"><b>${esc(e.by)}</b> <small class="muted">${fmtDateTime(e.at)}</small>
+        ${e.note ? `<p>${esc(e.note)}</p>` : ''}${e.file ? `<a href="${e.file.url}" target="_blank" rel="noopener">${icon.image} ${esc(e.file.name)}</a>` : ''}</div>`).join('') || '<p class="muted">No evidence yet.</p>'}</div>
+      ${c.status !== 'resolved' && o.role !== 'admin' ? `<form id="ev-form" class="evform"><textarea id="ev-note" placeholder="Explain what happened" style="min-height:70px"></textarea>
+        <input type="file" id="ev-file" accept="video/*,image/*"><p class="error" id="ev-err"></p><button class="btn ghost">Add evidence</button></form>` : ''}</div>` : ''}`;
+  const df = $('#deliver-form');
+  if (df) df.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = $('#rec-file').files[0];
+    if (!f) return ($('#rec-err').textContent = 'Choose your trade recording first.');
+    if (!$('#rec-ack').checked) return ($('#rec-err').textContent = 'Tick the box to confirm you read the rules and recorded the trade.');
+    try {
+      await busy($('#rec-btn'), async () => {
+        const fid = await uploadEvidence(f, (p) => ($('#rec-err').textContent = `Uploading… ${Math.round(p * 100)}%`));
+        await api(`/orders/${id}/deliver`, { file_id: fid, recorded: true });
+      });
+      toast('Delivery confirmed. Waiting for the buyer.'); orderPanel(id);
+    } catch (err) { $('#rec-err').textContent = err.message; }
+  };
+  const bc = $('#buyer-confirm');
+  if (bc) bc.onclick = async () => {
+    const stars = await askRating(o);
+    if (!stars) return;
+    try { await api(`/orders/${id}/confirm`, { stars }); toast('Thanks! You confirmed receipt.'); orderPanel(id); } catch (err) { toast(err.message, 'err'); }
+  };
+  const bp = $('#buyer-problem');
+  if (bp) bp.onclick = async () => {
+    const r = await askText('Open a case', 'Tell us what went wrong. The seller’s payment is held and the evidence is reviewed.', { label: 'What happened?', action: 'Open case', min: 10 });
+    if (!r) return;
+    try { await api(`/orders/${id}/refund-request`, { reason: r.text }); toast('Case opened'); orderPanel(id); } catch (err) { toast(err.message, 'err'); }
+  };
+  const ef = $('#ev-form');
+  if (ef) ef.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const file = $('#ev-file').files[0];
+      const fid = file ? await uploadEvidence(file, (p) => ($('#ev-err').textContent = `Uploading… ${Math.round(p * 100)}%`)) : undefined;
+      await api(`/orders/${id}/evidence`, { note: $('#ev-note').value, file_id: fid });
+      toast('Evidence added'); orderPanel(id);
+    } catch (err) { $('#ev-err').textContent = err.message; }
+  };
+}
+
 // ---------- Order chat ----------
 let chatTimer;
 async function chatPage(id) {
@@ -613,6 +691,7 @@ async function chatPage(id) {
           <div class="chat-head"><div class="th">${cover(o)}</div><div style="flex:1;min-width:0"><b>${esc(o.product_title)}</b>
             <small class="muted">${esc(o.receipt_no || '')} · chatting with ${avatar(other)} <b>${esc(other)}</b></small></div>
             <span class="status ${o.status}">${statusLabel(o.status, o.role === 'seller' ? 'seller' : 'buyer')}</span></div>
+          <div id="order-panel"></div>
           ${o.buyer_info ? `<div class="notice ok" style="margin:14px 0 0">${esc(o.buyer_info_label || 'Buyer info')}: <b>${esc(o.buyer_info)}</b></div>` : ''}
           <div class="chat-list" id="chat-list"></div>
           <form class="chat-form" id="cf"><input name="body" placeholder="Write a message… (e.g. your in-game username)" autocomplete="off" maxlength="2000">
@@ -634,6 +713,7 @@ async function chatPage(id) {
     if (first || messages.length !== n) list.scrollTop = list.scrollHeight;
   };
   await render(true);
+  await orderPanel(id);
   clearInterval(chatTimer);
   chatTimer = setInterval(() => { if (!location.hash.startsWith('#/chat/')) return clearInterval(chatTimer); render().catch(() => {}); }, 4000);
 }
@@ -732,7 +812,8 @@ async function sellPage(editId) {
             <small>${CFG.allowed_file_types.slice(0, 8).join(', ')}… up to ${CFG.max_file_mb} MB · programs and scripts aren’t allowed</small>
             <input type="file" id="pfile"></div>
           <div id="pchip"></div></div>
-        <div class="field"><label for="game">Game</label><input id="game" name="game" placeholder="e.g. Fortnite, CS2, Roblox" maxlength="60" required value="${v('game')}"></div>
+        <div class="field"><label for="game">Roblox game</label><select id="game" name="game" required><option value="">Choose a game…</option>
+          ${(CFG.games || []).map((g) => `<option ${existing?.game === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
         <div class="field"><label for="title">Item name</label><input id="title" name="title" placeholder="e.g. AK-47 | Redline (Field-Tested)" maxlength="100" required value="${v('title')}"></div>
         <div class="field"><label for="delivers">What the buyer receives</label>
           <textarea id="delivers" name="delivers" style="min-height:70px" placeholder="e.g. One ZIP with 12 skin files and an install guide" maxlength="500" required>${v('delivers')}</textarea></div>
@@ -885,7 +966,7 @@ async function dashboard() {
 
   app.innerHTML = `
     <div class="dash-head"><div><span class="eyebrow">Dashboard</span><h1>Hey, ${esc(me.username)}</h1></div>
-      <span style="display:flex;gap:10px"><a class="btn ghost" href="#/u/${encodeURIComponent(me.username)}">My profile</a><a class="btn" href="#/sell">${icon.plus} New listing</a></span></div>
+      <span style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="presence-toggle ${me.presence?.online ? 'on' : ''}" id="presence"><i></i>${me.presence?.online ? 'Online' : 'Offline'}</button><a class="btn ghost" href="#/u/${encodeURIComponent(me.username)}">My profile</a><a class="btn" href="#/sell">${icon.plus} New listing</a></span></div>
     ${me.status !== 'active' ? '<div class="notice bad">Your seller account is suspended. You can still download your purchases, but you can’t list items or request payouts. <a href="#/contact" style="color:inherit">Contact support</a>.</div>' : ''}
     ${isSeller ? `<div class="tiles">
       <div class="tile glass hl reveal"><div class="label">${icon.wallet} Available balance</div><div class="value">${money(d.balances.available_cents)}</div><div class="sub">Ready to pay out</div></div>
@@ -910,7 +991,7 @@ async function dashboard() {
     <div class="side"><span class="status ${o.status}">${statusLabel(o.status, 'buyer')}</span>
       ${o.can_download ? `<a class="btn sm" href="${o.download_url}">${icon.download} Download</a>` : ''}
       <a class="btn ghost sm" href="#/receipt/${o.id}">Receipt</a>
-      ${o.status !== 'cancelled' ? `<a class="btn ghost sm" href="#/chat/${o.id}">${icon.chat} Seller${o.messages ? ` (${o.messages})` : ''}</a>` : ''}
+      ${o.status !== 'cancelled' ? `<a class="btn ghost sm" href="#/chat/${o.id}">${icon.chat} Order &amp; chat${o.messages ? ` (${o.messages})` : ''}</a>` : ''}
       ${o.status === 'paid' ? `<button class="btn success sm" data-confirm="${o.id}">It works</button><button class="btn danger sm" data-refund-req="${o.id}">Request refund</button>` : ''}
       ${o.status === 'disputed' ? `<button class="btn success sm" data-confirm="${o.id}">It works now</button>` : ''}</div></div>`;
   const saleRow = (o, i) => `<div class="row reveal" style="--i:${i}">${th(o)}
@@ -923,7 +1004,7 @@ async function dashboard() {
         : o.status === 'refunded' ? `Refunded ${fmtDate(o.refunded_at)}: earnings reversed`
         : o.status === 'chargeback' ? `Charged back ${fmtDate(o.refunded_at)}: earnings reversed` : ''}</span></div>
     <div class="side"><span class="status ${o.status}">${statusLabel(o.status, 'seller')}</span>
-      <a class="btn ghost sm" href="#/chat/${o.id}">${icon.chat} Buyer${o.messages ? ` (${o.messages})` : ''}</a>
+      <a class="btn ${o.status === 'paid' && !o.seller_delivered_at ? '' : 'ghost'} sm" href="#/chat/${o.id}">${o.status === 'paid' && !o.seller_delivered_at ? 'Open order · must read' : `${icon.chat} Order &amp; chat`}${o.messages ? ` (${o.messages})` : ''}</a>
       ${o.status === 'disputed' ? `<button class="btn danger sm" data-refund="${o.id}">Refund buyer</button>` : ''}</div></div>`;
   const listingRow = (l, i) => `<div class="row reveal" style="--i:${i}">${th(l)}
     <div class="main"><a href="#/item/${l.id}" style="text-decoration:none"><b>${esc(l.title)}</b></a><small>${esc(l.game)} · ${money(l.price_cents)} · ${l.sold_count} sold${l.stock != null ? ` of ${l.stock}` : ''}</small>
@@ -964,7 +1045,7 @@ async function dashboard() {
       const stars = await askRating(order);
       if (!stars) return false;
       await api(`/orders/${order.id}/confirm`, { stars });
-      toast(`Thanks! ${order.seller} has been paid`);
+      toast('Thanks! You confirmed receipt.');
       return true;
     });
     act('[data-refund-req]', async (b) => {
@@ -997,6 +1078,12 @@ async function dashboard() {
     });
   };
 
+  const pt = $('#presence');
+  if (pt) pt.onclick = async () => {
+    const r = await api('/presence', { online: !pt.classList.contains('on') });
+    me.presence = r.presence; pt.classList.toggle('on', r.presence.online); pt.innerHTML = `<i></i>${r.presence.online ? 'Online' : 'Offline'}`;
+    toast(r.presence.online ? 'You’re online. Buyers can see you’re available.' : 'You’re offline.');
+  };
   $$('.tab').forEach((b) => (b.onclick = () => {
     tab = b.dataset.tab;
     history.replaceState(null, '', '#/dashboard?tab=' + tab);
@@ -1010,11 +1097,12 @@ async function adminPage() {
   if (!me) return needLogin('Log in first');
   if (me.role !== 'admin') throw new Error('Admins only.');
   const d = await api('/admin/overview');
+  d.cases = (await api('/admin/cases')).cases;
   const openReports = d.reports.filter((r) => r.status === 'open').length;
   const toPay = d.payouts.filter((p) => p.status === 'requested').length;
   const tabs = [['reports', 'Reports', openReports], ['disputes', 'Refund requests', d.disputes.length], ['orders', 'Orders', d.orders.length],
     ['listings', 'Listings', d.listings.length], ['users', 'Sellers', d.users.length], ['payouts', 'Payouts', toPay],
-    ['transactions', 'Transactions', d.transactions.length], ['support', 'Support', d.support.length]];
+    ['cases', 'Cases', (d.cases || []).filter((c) => c.status !== 'resolved').length], ['transactions', 'Transactions', d.transactions.length], ['support', 'Support', d.support.length]];
   let tab = hashParams().get('tab') || 'reports';
 
   app.innerHTML = `
@@ -1059,6 +1147,13 @@ async function adminPage() {
         <small>Requested ${fmtDateTime(p.created_at)}${p.reference ? ' · Ref ' + esc(p.reference) : ''}</small></div>
       <div class="side"><span class="status ${p.status === 'paid' ? 'completed' : p.status}">${statusLabel(p.status)}</span>
         ${p.status === 'requested' ? `<button class="btn success sm" data-paid="${p.id}">Mark paid</button><button class="btn ghost sm" data-failed="${p.id}">Mark failed</button>` : ''}</div></div>`).join('') || '<p class="muted">No payout requests.</p>',
+    cases: () => d.cases.map((c, i) => `<div class="row reveal" style="--i:${i}"><div class="main"><a href="#/chat/${c.order.id}" style="text-decoration:none"><b>Case #${c.id} · ${esc(c.order.product_title)}</b></a>
+        <small>${esc(c.order.buyer)} ↔ ${esc(c.order.seller)} · ${money(c.order.total_cents)} · opened by ${esc(c.opened_by)} ${fmtDateTime(c.created_at)}</small>
+        <div class="detail-text">${esc(c.reason)}</div>
+        ${c.ai ? `<div class="detail-text"><b>AI: ${esc(c.ai.recommendation.replace('_', ' '))}</b> (${esc(c.ai.confidence)} confidence): ${esc(c.ai.summary)}</div>` : ''}
+        <span class="when">${c.evidence.length} evidence item${c.evidence.length === 1 ? '' : 's'}${c.resolution ? ' · ' + esc(c.resolution) : ''}</span></div>
+      <div class="side"><span class="status ${c.status === 'resolved' ? 'completed' : 'disputed'}">${esc(c.status)}</span>
+        ${c.status !== 'resolved' ? `<button class="btn ghost sm" data-ai="${c.id}">Run AI review</button><button class="btn success sm" data-pay="${c.id}">Pay seller</button><button class="btn danger sm" data-cref="${c.id}">Refund buyer</button>` : ''}</div></div>`).join('') || '<p class="muted">No cases.</p>',
     transactions: () => `<div class="table-wrap"><table class="ledger-table"><thead><tr><th>Date</th><th>Type</th><th>Account</th><th>Balance</th><th>Amount</th><th>Order</th><th>Note</th></tr></thead><tbody>
       ${d.transactions.map((t) => `<tr><td>${fmtDateTime(t.created_at)}</td><td>${esc(t.type.replace(/_/g, ' '))}</td><td>${esc(t.user)}</td><td>${esc(t.bucket)}</td>
         <td class="${t.amount_cents < 0 ? 'neg' : ''}">${money(t.amount_cents)}</td><td>${t.order_id ? '#' + t.order_id : t.payout_id ? 'payout #' + t.payout_id : ''}</td><td>${esc(t.memo || '')}</td></tr>`).join('')}
@@ -1083,6 +1178,9 @@ async function adminPage() {
       if (!r) return false;
       return api(`/admin/listings/${b.dataset.removeListing}/remove`, { reason: r.text, revoke_access: r.checked });
     });
+    act('[data-ai]', async (b) => api(`/admin/cases/${b.dataset.ai}/ai-review`, {}));
+    act('[data-pay]', async (b) => (await confirmBox('Pay the seller?', 'Closes the case and releases the seller’s earnings.', 'Pay seller', 'success')) && api(`/admin/cases/${b.dataset.pay}/resolve`, { decision: 'pay_seller' }));
+    act('[data-cref]', async (b) => (await confirmBox('Refund the buyer?', 'Closes the case, refunds the buyer in full and reverses the seller’s earnings.', 'Refund buyer')) && api(`/admin/cases/${b.dataset.cref}/resolve`, { decision: 'refund_buyer' }));
     act('[data-dismiss]', async (b) => api(`/admin/reports/${b.dataset.dismiss}/resolve`, { action: 'dismiss', note: 'Reviewed: no action needed' }));
     act('[data-suspend]', async (b) => {
       const r = await askText('Suspend seller', 'They won’t be able to list, sell or request payouts. Buyers keep their past purchases.', { action: 'Suspend', min: 3 });
@@ -1145,13 +1243,13 @@ $('#top-search').onsubmit = (e) => {
   location.hash = '#/' + (q ? '?q=' + encodeURIComponent(q) : '');
 };
 async function loadGameBar() {
-  const { games } = await api('/listings');
   const cur = hashParams().get('game') || '';
-  $('#gamebar').innerHTML = `<a href="#/" class="${!cur ? 'on' : ''}">All games</a>` + games.map((g) =>
-    `<a href="#/?game=${encodeURIComponent(g.game)}" class="${g.game.toLowerCase() === cur.toLowerCase() ? 'on' : ''}">${esc(g.game)}</a>`).join('')
+  $('#gamebar').innerHTML = `<span class="gb-platform">Roblox</span><a href="#/" class="${!cur ? 'on' : ''}">All</a>` + (CFG.games || []).map((g) =>
+    `<a href="#/?game=${encodeURIComponent(g)}" class="${g.toLowerCase() === cur.toLowerCase() ? 'on' : ''}">${esc(g)}</a>`).join('')
     + '<a href="#/sell" class="gb-sell">+ Sell an item</a>';
 }
 window.addEventListener('hashchange', () => loadGameBar().catch(() => {}));
+setInterval(() => { if (me) api('/me').catch(() => {}); }, 60000); // keeps online status fresh
 
 async function loadMe() { me = (await api('/me')).user; renderNav(); }
 

@@ -642,3 +642,25 @@ body { background: #0f1115 !important; }
 .p-main h1 { font-size: 2rem; }
 .p-stats { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px; color: var(--muted); }
 .p-stats b { color: #fff; }
+
+/* Confirmations, must-read, cases, presence */
+.confirms { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.cstep { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: .85rem; font-weight: 600; }
+.cstep.done { color: var(--ok); background: rgba(52,211,153,.1); }
+.mustread { margin-top: 14px; padding: 18px; border-radius: 14px; border: 2px solid #e5383b; background: rgba(229,56,59,.08); }
+.mustread h3 { color: #ff6b6b; font-size: 1.1rem; margin-bottom: 8px; }
+.mustread ol { margin: 0 0 12px; padding-left: 20px; } .mustread li { margin: 6px 0; }
+.casebox { margin-top: 14px; padding: 16px; border-radius: 14px; border: 1px solid var(--line-strong); background: var(--surface); }
+.casebox h3 { font-size: 1.05rem; }
+.ai { padding: 12px; border-radius: 12px; background: rgba(249,115,22,.08); border: 1px solid rgba(249,115,22,.3); margin-bottom: 10px; }
+.ai p { margin: 6px 0; }
+.evlist { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.ev { padding: 10px 12px; border-radius: 10px; background: #0f1115; border: 1px solid var(--line); }
+.ev p { margin: 4px 0; } .ev a { color: #ff6b6b; display: inline-flex; gap: 6px; align-items: center; }
+.evform { display: flex; flex-direction: column; gap: 8px; }
+.presence-toggle { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--muted); font: 600 .9rem Rubik, sans-serif; cursor: pointer; }
+.presence-toggle i, .pres i { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; display: inline-block; }
+.presence-toggle.on { color: #fff; border-color: rgba(52,211,153,.5); } .presence-toggle.on i, .pres.on i { background: var(--ok); box-shadow: 0 0 0 3px rgba(52,211,153,.25); }
+.pres { display: inline-flex; align-items: center; gap: 6px; font-size: .85rem; font-weight: 600; color: var(--muted); vertical-align: middle; margin-left: 8px; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); }
+.pres.on { color: var(--ok); }
+.gb-platform { padding: 11px 14px 11px 0; color: #ff6b6b; font-weight: 800; font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; }

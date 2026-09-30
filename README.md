@@ -3,8 +3,9 @@
 Marketplace for digital game items. Products are listed by independent sellers; Lootrova keeps a **10% platform fee** from each successful sale (paid by the seller, never added to the buyer's price).
 
 ## Run
-Requires Node 22.5+ (uses the built-in SQLite). No dependencies.
+Requires Node 22.5+ (uses the built-in SQLite).
 
+    npm install
     npm start   # then open http://localhost:3000
 
 Opening `public/index.html` directly from disk won't work. The site needs the server for data, payments and downloads.
@@ -18,6 +19,7 @@ Opening `public/index.html` directly from disk won't work. The site needs the se
 | `ADMIN_USERS` | none | Comma-separated usernames that get the admin/moderator area, e.g. `ADMIN_USERS=yourname npm start` |
 | `CURRENCY` | `GBP` | Currency for prices |
 | `HOLD_DAYS` | `7` | Days seller earnings stay pending (buyer protection) |
+| `ANTHROPIC_API_KEY` | none | Turns on AI evidence review for cases (recommendations only; an admin decides) |
 | `SUPPORT_EMAIL` | none | Shown on the Contact page |
 | `DB_PATH`, `UPLOAD_DIR`, `FILES_DIR` | project folder | Where the database, public images and private product files are stored |
 
@@ -48,3 +50,10 @@ To take real payments, replace the provider with a live one (e.g. Stripe) that h
 
 ## Policies
 Terms of Service, Privacy, Cookies, Seller Terms, Refund & Dispute, Copyright/IP and Prohibited Products live in `public/policies.js`, and support messages come in through the Contact page. The policy texts are plain-language drafts: have them reviewed by a solicitor before launch.
+
+## Roblox games, confirmations and cases
+- Launch games: Pet Simulator 99, Steal a Brainrot, Jailbreak and Blox Fruits (`GAMES` in `server.js`).
+- Every order needs **both** confirmations: the seller uploads a screen recording of the trade and confirms delivery, and the buyer confirms receipt. Money is released only when both have confirmed.
+- If either side hasn't confirmed by the deadline (`HOLD_DAYS`), or the buyer reports a problem, a **case** opens automatically. Both sides can add notes, screenshots and videos.
+- With `ANTHROPIC_API_KEY` set, `ai-review.js` asks Claude to review the case evidence and recommend paying the seller, refunding the buyer, or escalating to a person. Admins make the final decision in Admin → Cases.
+- Sellers can switch themselves online or offline. Profiles show their status, average hours online per day (last 30 days) and, after 4 delivered sales, their average delivery time.
