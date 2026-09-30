@@ -525,3 +525,8 @@ select option { background: #10111a; }
   .receipt { box-shadow: none; border: 1px solid #ccc; background: #fff; color: #000; }
   .receipt .line span, .receipt .meta { color: #000 !important; }
 }
+
+/* Plain background: no glowing blobs, grid or shimmering text */
+.bg { display: none; }
+body { background: #0c0d11; }
+.grad-text { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--violet-soft); animation: none; }
