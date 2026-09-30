@@ -209,6 +209,86 @@ function reportModal(listing) {
   });
 }
 
+// Card payment popup for platform purchases (boosts, subscriptions).
+function payModal({ title, text, amount, create, sync, consent }) {
+  return modal(`<h2>${title}</h2><p class="muted" style="margin:0 0 14px">${text}</p>
+    <div class="summary-panel" style="padding:0 0 10px"><div class="line total" style="margin:0;border:0;padding-top:0"><span>Total</span><span>${money(amount)}</span></div></div>
+    ${CFG.test_mode ? `<div class="test-cards"><b>Test mode: no real money is taken</b>${CFG.test_cards.slice(0, 3).map((c) => `<button type="button" data-card="${c.number}"><code>${formatCardNumber(c.number)}</code> ${esc(c.label)}</button>`).join('')}</div>` : ''}
+    <div class="card-fields"><div class="field full"><label>Card number</label><input id="pcc" inputmode="numeric" placeholder="1234 5678 9012 3456"></div>
+      <div class="field"><label>Expiry</label><input id="pexp" placeholder="MM / YY"></div><div class="field"><label>CVC</label><input id="pcvc" maxlength="4" placeholder="123"></div></div>
+    ${consent ? `<label class="check" style="margin-top:14px"><input type="checkbox" id="pconsent"><span>${consent}</span></label>` : ''}
+    <p class="error" id="perr"></p>
+    <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="go">${icon.lock} Pay ${money(amount)}</button></div>`,
+  (el, close) => {
+    $('#pcc', el).oninput = (e) => (e.target.value = formatCardNumber(e.target.value));
+    $('#pexp', el).oninput = (e) => (e.target.value = formatExpiry(e.target.value));
+    $$('[data-card]', el).forEach((b) => (b.onclick = () => { $('#pcc', el).value = formatCardNumber(b.dataset.card); $('#pexp', el).value = '12 / ' + String((new Date().getFullYear() + 3) % 100); $('#pcvc', el).value = '123'; }));
+    $('#go', el).onclick = async () => {
+      const err = $('#perr', el);
+      err.textContent = '';
+      if (consent && !$('#pconsent', el).checked) return (err.textContent = 'Please tick the box to continue.');
+      try {
+        await busy($('#go', el), async () => {
+          const r = await create();
+          const [mm, yy] = $('#pexp', el).value.split('/').map((x) => x.trim());
+          await request(`/provider/${r.payment.provider}/payment_intents/${r.payment.intent_id}/confirm`, { client_secret: r.payment.client_secret, card: { number: $('#pcc', el).value, exp_month: mm, exp_year: yy, cvc: $('#pcvc', el).value } })
+            .catch((e) => { throw new Error(e.message + ' You can try again.'); });
+          close(await sync(r));
+        });
+      } catch (e) { err.textContent = e.message; }
+    };
+  });
+}
+let PLANS;
+async function boostListing(l) {
+  PLANS ??= await api('/plans');
+  const pick = await modal(`<h2>Boost “${esc(l.title)}”</h2><p class="muted" style="margin:0 0 14px">Boosted listings appear first in the marketplace with a <b>⚡ Boosted</b> label.${l.boosted_until ? ` Currently boosted until ${fmtDateTime(l.boosted_until)}; buying more extends it.` : ''}</p>
+    <div class="radio-group">${PLANS.boosts.map((b, i) => `<label class="check"><input type="radio" name="tier" value="${b.id}" ${i === 0 ? 'checked' : ''}><span><b>${esc(b.label)}</b> · ${money(b.price)}</span></label>`).join('')}</div>
+    <div class="actions"><button class="btn ghost" data-close>Cancel</button><button class="btn" id="go">Continue</button></div>`,
+  (el, close) => { $('#go', el).onclick = () => close(PLANS.boosts.find((b) => b.id === $('input[name=tier]:checked', el).value)); });
+  if (!pick) return false;
+  const done = await payModal({ title: `Boost for ${pick.label}`, text: 'Paid to the platform. Boosts start straight away and are non-refundable once active.', amount: pick.price,
+    create: () => api(`/listings/${l.id}/boost`, { tier: pick.id }), sync: (r) => api(`/boosts/${r.boost_id}/sync`, {}) });
+  if (done?.boost?.status === 'active') { toast(`Boosted until ${fmtDateTime(done.boost.ends_at)}`); return true; }
+  return false;
+}
+
+// ---------- Macro subscriptions ----------
+async function macroPage() {
+  const d = PLANS = await api('/plans');
+  const cur = d.current;
+  app.innerHTML = `<div class="section-head" style="margin-top:44px"><div><span class="eyebrow">For sellers</span><h2 style="font-size:2rem">Trade Macro</h2>
+      <p class="muted" style="margin:6px 0 0;max-width:640px">Automate your Roblox trades. The macro picks up paid orders, runs the trade with the buyer’s username, records it and confirms delivery for you.</p></div></div>
+    ${cur ? `<div class="glass payout-panel"><div><div class="label muted">Your plan</div><div class="price" style="font-size:1.6rem">${esc(cur.name)}</div>
+        <p>${cur.limit == null ? `Unlimited automated trades · ${cur.used} used this period` : `${cur.used} of ${cur.limit} automated trades used`} · renews ${fmtDate(cur.period_end)}</p>
+        ${cur.limit != null ? `<div class="progress" style="height:8px;max-width:420px"><i style="width:${Math.min(100, (cur.used / cur.limit) * 100)}%"></i></div>` : ''}</div>
+      <div style="display:flex;flex-direction:column;gap:8px"><button class="btn" id="key">${d.has_key ? 'Create a new macro key' : 'Get my macro key'}</button>
+        <span class="muted" style="font-size:.8rem">The macro app is coming soon.</span></div></div>` : ''}
+    <div class="plans">${d.plans.map((p) => `<div class="plan glass ${p.monthly_limit == null ? 'best' : ''}">
+        ${p.monthly_limit == null ? '<span class="plan-tag">Best for big sellers</span>' : ''}
+        <h3>${esc(p.name)}</h3><div class="price">${money(p.price)}<small> /month</small></div>
+        <ul><li>${esc(p.blurb)}</li><li>Automatic trade recording</li><li>Auto-confirms delivery with the recording</li><li>Works with Pet Simulator 99, Steal a Brainrot, Jailbreak and Blox Fruits</li></ul>
+        <button class="btn block ${cur?.plan === p.id ? 'ghost' : ''}" data-plan="${p.id}" ${cur?.plan === p.id ? 'disabled' : ''}>${cur?.plan === p.id ? 'Current plan' : cur ? 'Switch to this plan' : 'Subscribe'}</button></div>`).join('')}</div>
+    <p class="fine">Plans last 30 days from payment. Switching plans starts a new 30-day period. Automated trades still follow the same rules as manual ones: the recording is uploaded as delivery proof.</p>`;
+  $$('[data-plan]').forEach((b) => (b.onclick = async () => {
+    if (!me) return needLogin('Log in to subscribe');
+    const p = d.plans.find((x) => x.id === b.dataset.plan);
+    const r = await payModal({ title: `Subscribe to ${p.name}`, text: `${p.blurb}. ${money(p.price)} for 30 days.`, amount: p.price,
+      consent: 'I want access to start straight away and understand I lose my 14-day right to cancel once it starts.',
+      create: () => api('/subscriptions', { plan: p.id, consent: true }), sync: (x) => api(`/subscriptions/${x.subscription_id}/sync`, {}) });
+    if (r?.current) { toast(`You're on ${r.current.name}`); macroPage(); }
+  }));
+  const k = $('#key');
+  if (k) k.onclick = async () => {
+    if (d.has_key && !(await confirmBox('Create a new key?', 'Your old key stops working straight away.', 'Create new key', ''))) return;
+    const { key } = await api('/macro-key', {});
+    modal(`<h2>Your macro key</h2><p class="muted">Copy it now; it won’t be shown again. Paste it into the macro app when it’s released. Never share it.</p>
+      <input value="${esc(key)}" readonly onclick="this.select()" style="font-family:monospace">
+      <div class="actions"><button class="btn" data-close>Done</button></div>`);
+    d.has_key = true;
+  };
+}
+
 // ---------- Nav ----------
 function renderNav() {
   const page = location.hash.replace(/^#\//, '').split(/[?/]/)[0];
@@ -232,7 +312,7 @@ const skeletons = (n) => Array.from({ length: n }, () => `
 
 const card = (l, i) => `
   <a class="card reveal" style="--i:${i}" href="#/item/${l.id}">
-    <div class="media">${cover(l)}<span class="badge">${esc(l.game)}</span>
+    <div class="media">${cover(l)}<span class="badge">${esc(l.game)}</span>${l.boosted_until ? '<span class="boost-badge">⚡ Boosted</span>' : ''}
       ${l.images.length > 1 ? `<span class="img-count">${icon.image}${l.images.length}</span>` : ''}</div>
     <div class="body"><h3>${esc(l.title)}</h3>
       <div class="foot"><div class="seller">${avatar(l.seller)}<span>${esc(l.seller)}</span>${rating(l.seller_rating)}</div>
@@ -345,6 +425,7 @@ async function itemPage(id) {
         <div class="line"><span>Price</span><span>${money(l.price_cents)}</span></div>
         <div class="line"><span>Lootrova fee (${feePct()})</span><span>−${money(fee)}</span></div>
         <div class="line total"><span>You receive</span><b>${money(l.price_cents - fee)}</b></div></div>
+      ${l.status === 'active' ? `<button class="btn block" id="boost" style="margin-bottom:10px">⚡ ${l.boosted_until ? `Boosted until ${fmtDateTime(l.boosted_until)} · extend` : 'Boost this listing'}</button>` : ''}
       ${l.status !== 'removed' ? `<div class="cta-row"><a class="btn ghost" href="#/edit/${l.id}">Edit listing</a><button class="btn danger" id="remove">Remove listing</button></div>` : ''}`;
   } else if (l.owned_order_id) {
     cta = `<div class="notice ok">You own this item.</div>
@@ -400,6 +481,8 @@ async function itemPage(id) {
     try { await api(`/listings/${l.id}/remove`, {}); toast('Listing removed'); location.hash = '#/dashboard?tab=listings'; }
     catch (err) { toast(err.message, 'err'); }
   };
+  const bst = $('#boost');
+  if (bst) bst.onclick = async () => { if (await boostListing(l)) itemPage(l.id); };
   const report = $('#report');
   if (report) report.onclick = async () => { if (await reportModal(l)) toast('Thanks. Our moderators will review your report.'); };
 }
@@ -1011,7 +1094,7 @@ async function dashboard() {
       ${l.status === 'removed' ? `<span class="when">Removed by Lootrova: ${esc(l.removal_reason || 'breaks marketplace rules')}</span>` : ''}
       ${!l.has_file && l.status !== 'removed' ? '<span class="when">Add a product file so buyers can purchase this item.</span>' : ''}</div>
     <div class="side"><span class="status ${l.status}">${statusLabel(l.status)}</span>
-      ${l.status !== 'removed' ? `<a class="btn ghost sm" href="#/edit/${l.id}">Edit</a><button class="btn danger sm" data-remove="${l.id}">Remove</button>` : ''}</div></div>`;
+      ${l.status === 'active' ? `<button class="btn ${l.boosted_until ? 'ghost' : ''} sm" data-boost="${l.id}">⚡ ${l.boosted_until ? 'Boosted' : 'Boost'}</button>` : ''}${l.status !== 'removed' ? `<a class="btn ghost sm" href="#/edit/${l.id}">Edit</a><button class="btn danger sm" data-remove="${l.id}">Remove</button>` : ''}</div></div>`;
   const payoutsView = () => `
     <div class="payout-panel glass"><div><div class="label muted">${icon.wallet} Available to pay out</div>
       <div class="price" style="font-size:1.8rem">${money(d.balances.available_cents)}</div>
@@ -1069,6 +1152,7 @@ async function dashboard() {
       toast('Listing removed');
       return true;
     });
+    act('[data-boost]', async (b) => boostListing(d.listings.find((x) => x.id === +b.dataset.boost)));
     act('#payout', async () => {
       if (!(await confirmBox('Request payout?', `We’ll pay out ${money(d.balances.available_cents)}. Payouts are usually processed within 3 business days.`, 'Request payout', ''))) return false;
       await api('/payouts', {});
@@ -1286,6 +1370,7 @@ async function route() {
     else if (view === 'order') await orderPage(Number(id));
     else if (view === 'receipt') await receiptPage(Number(id));
     else if (view === 'chat') await chatPage(Number(id));
+    else if (view === 'macro') await macroPage();
     else if (view === 'u') await profilePage(decodeURIComponent(id || ''));
     else if (view === 'admin') await adminPage();
     else if (view === 'policy') policyPage(id);

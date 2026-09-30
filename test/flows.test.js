@@ -523,3 +523,69 @@ test('seller online status and delivery average after 4 sales', async () => {
   assert.equal((await s.post('/api/presence', { online: false })).data.presence.online, false);
   assert.ok(id);
 });
+
+test('boosts: paid, labelled, listed first, own listings only', async () => {
+  const s = await user('boost_seller');
+  const other = await user('boost_other');
+  const plain = await listItem(s, { title: 'Plain item' });
+  const star = await listItem(s, { title: 'Boosted item' });
+  await listItem(s, { title: 'Newest item' });
+  assert.equal((await other.post(`/api/listings/${star}/boost`, { tier: '24h' })).status, 403);
+  const b = await s.post(`/api/listings/${star}/boost`, { tier: '24h', price: 1 });
+  assert.equal(b.status, 200);
+  assert.equal(b.data.payment.amount_cents, 99, 'server price, not client');
+  let listed = (await client().get('/api/listings')).data.listings;
+  assert.ok(!listed[0].boosted_until, 'not boosted before payment');
+  const bad = await s.post(`/provider/sandbox/payment_intents/${b.data.payment.intent_id}/confirm`, { client_secret: b.data.payment.client_secret, card: CARD_DECLINE });
+  assert.equal(bad.status, 402);
+  await s.post(`/provider/sandbox/payment_intents/${b.data.payment.intent_id}/confirm`, { client_secret: b.data.payment.client_secret, card: CARD_OK });
+  const synced = (await s.post(`/api/boosts/${b.data.boost_id}/sync`, {})).data.boost;
+  assert.equal(synced.status, 'active');
+  listed = (await client().get('/api/listings')).data.listings;
+  assert.equal(listed[0].id, star, 'boosted listing shows first');
+  assert.ok(listed[0].boosted_until);
+  assert.ok(!listed.find((l) => l.id === plain).boosted_until);
+});
+
+test('macro subscriptions: plans, quota of 100, unlimited plan, key-only macro API', async () => {
+  const s = await user('macro_seller');
+  const plans = (await s.get('/api/plans')).data.plans;
+  assert.deepEqual(plans.map((p) => [p.id, p.monthly_limit]), [['macro_basic', 100], ['macro_unlimited', null]]);
+  assert.ok(plans[1].price > plans[0].price);
+  assert.equal((await s.post('/api/macro-key', {})).status, 403, 'no key without a plan');
+  const sub = await s.post('/api/subscriptions', { plan: 'macro_basic', consent: true });
+  await s.post(`/provider/sandbox/payment_intents/${sub.data.payment.intent_id}/confirm`, { client_secret: sub.data.payment.client_secret, card: CARD_OK });
+  const cur = (await s.post(`/api/subscriptions/${sub.data.subscription_id}/sync`, {})).data.current;
+  assert.equal(cur.limit, 100);
+  const key = (await s.post('/api/macro-key', {})).data.key;
+  assert.match(key, /^mk_/);
+  const macro = async (method, url, body) => {
+    const r = await fetch(`http://localhost:${PORT}${url}`, { method, headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+    return { status: r.status, data: await r.json() };
+  };
+  assert.equal((await macro('GET', '/api/macro/status')).data.plan.remaining, 100);
+  assert.equal((await macro('GET', '/api/dashboard')).status, 401, 'macro key cannot reach the rest of the site');
+  const b = await user('macro_buyer');
+  const { order } = await pay(b, await listItem(s, { title: 'Macro sale' }));
+  assert.ok((await macro('GET', '/api/macro/orders')).data.orders.some((o) => o.id === order.id));
+  const st = await macro('POST', `/api/macro/orders/${order.id}/start`, {});
+  assert.equal(st.data.plan.used, 1);
+  assert.equal((await macro('POST', `/api/macro/orders/${order.id}/start`, {})).data.plan.used, 1, 'same order counts once');
+  // Use up the allowance.
+  const sid = db().prepare('SELECT id FROM users WHERE username = ?').get('macro_seller').id;
+  const ins = db().prepare('INSERT INTO macro_usage (user_id, order_id, created_at) VALUES (?, ?, ?)');
+  for (let i = 0; i < 99; i++) ins.run(sid, 100000 + i, new Date().toISOString());
+  const { order: o2 } = await pay(b, await listItem(s, { title: 'Over quota' }));
+  assert.equal((await macro('POST', `/api/macro/orders/${o2.id}/start`, {})).status, 429);
+  // Upgrading to unlimited replaces the basic plan.
+  const up = await s.post('/api/subscriptions', { plan: 'macro_unlimited', consent: true });
+  await s.post(`/provider/sandbox/payment_intents/${up.data.payment.intent_id}/confirm`, { client_secret: up.data.payment.client_secret, card: CARD_OK });
+  assert.equal((await s.post(`/api/subscriptions/${up.data.subscription_id}/sync`, {})).data.current.plan, 'macro_unlimited');
+  assert.equal((await macro('POST', `/api/macro/orders/${o2.id}/start`, {})).status, 200);
+  // The macro can deliver with the recording using only its key.
+  const up2 = await fetch(`http://localhost:${PORT}/api/files`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/octet-stream', 'x-file-name': 'rec.mp4' }, body: Buffer.from('video') });
+  const fid = (await up2.json()).id;
+  assert.equal((await macro('POST', `/api/orders/${o2.id}/deliver`, { file_id: fid, recorded: true })).status, 200);
+  assert.equal((await macro('GET', '/api/macro/status')).status, 200);
+  assert.equal((await fetch(`http://localhost:${PORT}/api/macro/status`, { headers: { authorization: 'Bearer mk_' + '0'.repeat(48) } })).status, 401);
+});

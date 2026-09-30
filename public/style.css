@@ -664,3 +664,13 @@ body { background: #0f1115 !important; }
 .pres { display: inline-flex; align-items: center; gap: 6px; font-size: .85rem; font-weight: 600; color: var(--muted); vertical-align: middle; margin-left: 8px; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); }
 .pres.on { color: var(--ok); }
 .gb-platform { padding: 11px 14px 11px 0; color: #ff6b6b; font-weight: 800; font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; }
+
+/* Boosts and plans */
+.boost-badge { position: absolute; bottom: 12px; left: 12px; z-index: 1; padding: 5px 10px; border-radius: 8px; font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: #e5383b; color: #fff; }
+.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin: 18px 0; }
+.plan { padding: 26px; position: relative; display: flex; flex-direction: column; gap: 12px; }
+.plan.best { border-color: #e5383b; }
+.plan h3 { font-size: 1.3rem; } .plan .price { font-size: 2.2rem; } .plan .price small { font-size: .9rem; color: var(--muted); font-weight: 500; }
+.plan ul { margin: 0 0 8px; padding-left: 18px; color: #c9ccd6; } .plan li { margin: 6px 0; }
+.plan .btn { margin-top: auto; }
+.plan-tag { position: absolute; top: -12px; right: 18px; padding: 4px 12px; border-radius: 999px; background: #e5383b; font-size: .75rem; font-weight: 700; }

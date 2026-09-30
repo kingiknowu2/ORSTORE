@@ -65,3 +65,18 @@ With `ANTHROPIC_API_KEY` set, every uploaded image (listing photos and case scre
 - **safe**: shown normally.
 
 Without a key, images are not screened and Admin → Image safety says so.
+
+## Boosts and macro subscriptions
+- **Boosts** (`BOOSTS` in `server.js`): 24 hours £0.99, 3 days £2.49, 7 days £4.99. Paid to the platform; boosted listings show first with a "⚡ Boosted" label. Buying again extends the boost.
+- **Macro plans** (`PLANS`): Macro Basic £4.99/month for 100 automated trades; Macro Unlimited £12.99/month. Each lasts 30 days from payment (renewal is manual until a live payment provider with recurring billing is connected).
+
+### Macro API (for the trade macro)
+Subscribers create a key on the Macro page. The macro sends it as `Authorization: Bearer mk_...`. A key can only use these endpoints:
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/macro/status` | Plan, trades used and remaining this period |
+| `GET /api/macro/orders` | Paid orders waiting for delivery, with the buyer's username |
+| `POST /api/macro/orders/:id/start` | Uses one automated trade (free if already started for that order); returns 429 when the monthly limit is reached |
+| `POST /api/files` | Upload the trade recording (raw bytes, `X-File-Name: trade.mp4`) and get a `file_id` |
+| `POST /api/orders/:id/deliver` | `{ "file_id": ..., "recorded": true }` confirms delivery with the recording |

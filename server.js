@@ -28,6 +28,13 @@ fs.mkdirSync(FILES_DIR, { recursive: true });
 const GAMES = ['Pet Simulator 99', 'Steal a Brainrot', 'Jailbreak', 'Blox Fruits'];
 const MIN_SALES_FOR_DELIVERY_STAT = 4;
 const ONLINE_TIMEOUT_MS = 5 * 60 * 1000;
+// Paid extras. Prices in minor units of CURRENCY.
+const BOOSTS = { '24h': { label: '24 hours', hours: 24, price: 99 }, '3d': { label: '3 days', hours: 72, price: 249 }, '7d': { label: '7 days', hours: 168, price: 499 } };
+const PLANS = {
+  macro_basic: { name: 'Macro Basic', price: 499, monthly_limit: 100, blurb: '100 automated trades a month' },
+  macro_unlimited: { name: 'Macro Unlimited', price: 1299, monthly_limit: null, blurb: 'Unlimited automated trades' },
+};
+const PERIOD_MS = 30 * 86400000;
 const LICENCES = {
   personal: 'Personal use: for the buyer’s own use only. No resale or redistribution.',
   commercial: 'Commercial use: may be used in the buyer’s own commercial projects. The files themselves may not be resold or redistributed.',
@@ -109,6 +116,16 @@ CREATE TABLE IF NOT EXISTS presence_sessions (id INTEGER PRIMARY KEY, user_id IN
 CREATE TABLE IF NOT EXISTS image_checks (
   id INTEGER PRIMARY KEY, kind TEXT NOT NULL, ref_id INTEGER NOT NULL, image TEXT NOT NULL, verdict TEXT NOT NULL,
   category TEXT, reason TEXT, reviewed_by INTEGER, review_decision TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS boosts (
+  id INTEGER PRIMARY KEY, listing_id INTEGER NOT NULL, seller_id INTEGER NOT NULL, tier TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+  payment_intent_id TEXT, status TEXT NOT NULL DEFAULT 'awaiting_payment', -- awaiting_payment | active | expired
+  starts_at TEXT, ends_at TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, plan TEXT NOT NULL, amount_cents INTEGER NOT NULL,
+  payment_intent_id TEXT, status TEXT NOT NULL DEFAULT 'awaiting_payment', -- awaiting_payment | active | cancelled | expired
+  period_start TEXT, period_end TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS macro_keys (user_id INTEGER PRIMARY KEY, key_hash TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS macro_usage (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, order_id INTEGER NOT NULL, created_at TEXT NOT NULL, UNIQUE (user_id, order_id));
 CREATE TABLE IF NOT EXISTS support_messages (
   id INTEGER PRIMARY KEY, user_id INTEGER, name TEXT NOT NULL, email TEXT NOT NULL, subject TEXT NOT NULL,
   message TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -171,11 +188,54 @@ const receiptNo = (id) => `LR-${new Date().getUTCFullYear()}-${String(id).padSta
 const payments = createSandboxProvider(db, { onEvent: onPaymentEvent });
 
 function onPaymentEvent(type, intent) {
+  if (intent.metadata.kind === 'boost' || intent.metadata.kind === 'subscription') {
+    if (type === 'payment_intent.succeeded') activatePurchase(intent.metadata.kind, Number(intent.metadata.ref_id));
+    return;
+  }
   const orderId = Number(intent.metadata.order_id);
   db.prepare(`INSERT INTO payment_attempts (order_id, intent_id, status, error_code, message, card_last4, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .run(orderId, intent.id, type === 'payment_intent.succeeded' ? 'succeeded' : 'failed',
       intent.last_error?.code ?? null, intent.last_error?.message ?? null, intent.card?.last4 ?? null, nowIso());
   if (type === 'payment_intent.succeeded') fulfilOrder(orderId);
+}
+
+// Boosts and subscriptions are paid to the platform. Activation re-checks the payment with the provider.
+function activatePurchase(kind, id) {
+  const table = kind === 'boost' ? 'boosts' : 'subscriptions';
+  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  if (!row || row.status !== 'awaiting_payment') return;
+  const intent = payments.retrieveIntent(row.payment_intent_id);
+  if (!intent || intent.status !== 'succeeded' || intent.amount !== row.amount_cents) return;
+  tx(() => {
+    const now = new Date();
+    if (kind === 'boost') {
+      // Stack onto an existing boost so buying again extends it.
+      const cur = db.prepare(`SELECT MAX(ends_at) AS e FROM boosts WHERE listing_id = ? AND status = 'active' AND ends_at > ?`).get(row.listing_id, now.toISOString()).e;
+      const start = cur ? new Date(cur) : now;
+      db.prepare(`UPDATE boosts SET status = 'active', starts_at = ?, ends_at = ? WHERE id = ? AND status = 'awaiting_payment'`)
+        .run(start.toISOString(), new Date(+start + BOOSTS[row.tier].hours * 3600000).toISOString(), id);
+    } else {
+      const cur = db.prepare(`SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active' AND period_end > ? AND id != ?`).get(row.user_id, now.toISOString(), id);
+      if (cur) db.prepare(`UPDATE subscriptions SET status = 'cancelled' WHERE id = ?`).run(cur.id); // switching plan replaces the old one
+      db.prepare(`UPDATE subscriptions SET status = 'active', period_start = ?, period_end = ? WHERE id = ? AND status = 'awaiting_payment'`)
+        .run(now.toISOString(), new Date(+now + PERIOD_MS).toISOString(), id);
+    }
+    ledgerAdd({ type: kind === 'boost' ? 'boost_sale' : 'subscription_sale', user_id: null, bucket: 'platform', amount: row.amount_cents, memo: `${kind} #${id} (${intent.id})` });
+  });
+}
+function activePlan(userId) {
+  const sub = db.prepare(`SELECT * FROM subscriptions WHERE user_id = ? AND status = 'active' AND period_end > ? ORDER BY id DESC`).get(userId, nowIso());
+  if (!sub) return null;
+  const used = db.prepare('SELECT COUNT(*) AS n FROM macro_usage WHERE user_id = ? AND created_at >= ?').get(userId, sub.period_start).n;
+  const limit = PLANS[sub.plan].monthly_limit;
+  return { id: sub.id, plan: sub.plan, name: PLANS[sub.plan].name, period_end: sub.period_end, used, limit, remaining: limit == null ? null : Math.max(0, limit - used) };
+}
+const boostEnd = (listingId) => db.prepare(`SELECT MAX(ends_at) AS e FROM boosts WHERE listing_id = ? AND status = 'active' AND ends_at > ?`).get(listingId, nowIso()).e;
+// Creates a platform payment (boost or subscription) and returns what the browser needs to confirm it.
+function platformCharge(kind, table, rowId, amount) {
+  const intent = payments.createIntent({ amount, currency: CURRENCY, metadata: { kind, ref_id: rowId } });
+  db.prepare(`UPDATE ${table} SET payment_intent_id = ? WHERE id = ?`).run(intent.id, rowId);
+  return { provider: payments.name, intent_id: intent.id, client_secret: intent.client_secret, amount_cents: amount };
 }
 
 // Marks an order paid only after re-checking the payment with the provider. Safe to call repeatedly.
@@ -387,6 +447,13 @@ function currentUser(req) {
   if (!m) return null;
   return db.prepare(`SELECT u.id, u.username, u.role, u.status FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`).get(m[1]) || null;
 }
+// Macro apps authenticate with "Authorization: Bearer mk_..." and can only reach the macro and delivery endpoints.
+function macroUser(req) {
+  const m = /^Bearer (mk_[a-f0-9]{48})$/.exec(req.headers.authorization || '');
+  if (!m) return null;
+  const hash = crypto.createHash('sha256').update(m[1]).digest('hex');
+  return db.prepare(`SELECT u.id, u.username, u.role, u.status FROM macro_keys k JOIN users u ON u.id = k.user_id WHERE k.key_hash = ?`).get(hash) || null;
+}
 function startSession(res, userId) {
   const token = crypto.randomBytes(24).toString('hex');
   db.prepare('INSERT INTO sessions (token, user_id) VALUES (?, ?)').run(token, userId);
@@ -487,6 +554,7 @@ function listingDetail(l, user) {
     unavailable_reason: q.ok ? null : q.error,
     owned_order_id: q.order_id || null,
     is_owner: !!user && user.id === l.seller_id,
+    boosted_until: boostEnd(l.id),
   };
 }
 
@@ -618,14 +686,14 @@ const routes = {
     const game = url.searchParams.get('game') || '';
     const visible = `l.status = 'active' AND u.status = 'active' AND l.file_id IS NOT NULL AND l.image_safety NOT IN ('pending', 'flagged')`;
     const rows = db.prepare(LISTING_SELECT + ` WHERE ${visible} AND (l.title LIKE ? OR l.game LIKE ?)
-      AND (? = '' OR l.game = ? COLLATE NOCASE) ORDER BY l.id DESC LIMIT 100`).all(q, q, game, game);
+      AND (? = '' OR l.game = ? COLLATE NOCASE) ORDER BY (SELECT MAX(ends_at) FROM boosts b WHERE b.listing_id = l.id AND b.status = 'active' AND b.ends_at > ?) IS NULL, l.id DESC LIMIT 100`).all(q, q, game, game, nowIso());
     const games = db.prepare(`SELECT l.game, COUNT(*) AS count FROM listings l JOIN users u ON u.id = l.seller_id WHERE ${visible}
       GROUP BY l.game COLLATE NOCASE ORDER BY count DESC LIMIT 12`).all();
     const stats = db.prepare(`SELECT
       (SELECT COUNT(*) FROM listings l JOIN users u ON u.id = l.seller_id WHERE ${visible}) AS live,
       (SELECT COUNT(DISTINCT seller_id) FROM listings) AS sellers,
       (SELECT COUNT(*) FROM orders WHERE status IN ('paid', 'completed', 'disputed')) AS completed`).get();
-    send(res, 200, { listings: rows.map(parseImages), games, stats });
+    send(res, 200, { listings: rows.map((r) => ({ ...parseImages(r), boosted_until: boostEnd(r.id) })), games, stats });
   },
   'GET /api/listings/:id': (req, res, user, url, id) => {
     const l = db.prepare(LISTING_SELECT + ' WHERE l.id = ?').get(id);
@@ -951,6 +1019,79 @@ const routes = {
     send(res, 200, { listings: db.prepare(LISTING_SELECT + ` JOIN follows f ON f.followee_id = l.seller_id AND f.follower_id = ?
       WHERE l.status = 'active' AND u.status = 'active' AND l.file_id IS NOT NULL ORDER BY l.id DESC LIMIT 24`).all(user.id).map(parseImages) });
   },
+  // ----- Boosts -----
+  'POST /api/listings/:id/boost': async (req, res, user, url, id) => {
+    requireActive(user);
+    const b = await readBody(req);
+    const tier = BOOSTS[b.tier] ? b.tier : null;
+    if (!tier) return send(res, 400, { error: 'Choose a boost length.' });
+    const l = db.prepare('SELECT * FROM listings WHERE id = ?').get(id);
+    if (!l || l.seller_id !== user.id) return send(res, 403, { error: 'You can only boost your own listings.' });
+    if (l.status !== 'active') return send(res, 400, { error: 'Only active listings can be boosted.' });
+    const r = db.prepare('INSERT INTO boosts (listing_id, seller_id, tier, amount_cents, created_at) VALUES (?, ?, ?, ?, ?)').run(id, user.id, tier, BOOSTS[tier].price, nowIso());
+    send(res, 200, { boost_id: r.lastInsertRowid, payment: platformCharge('boost', 'boosts', r.lastInsertRowid, BOOSTS[tier].price) });
+  },
+  'POST /api/boosts/:id/sync': (req, res, user, url, id) => {
+    requireUser(user);
+    const row = db.prepare('SELECT * FROM boosts WHERE id = ? AND seller_id = ?').get(id, user.id);
+    if (!row) return send(res, 404, { error: 'Not found.' });
+    activatePurchase('boost', id);
+    send(res, 200, { boost: db.prepare('SELECT id, listing_id, tier, status, starts_at, ends_at FROM boosts WHERE id = ?').get(id) });
+  },
+  // ----- Macro subscriptions -----
+  'GET /api/plans': (req, res, user) => send(res, 200, {
+    plans: Object.entries(PLANS).map(([id, p]) => ({ id, ...p })), boosts: Object.entries(BOOSTS).map(([id, b]) => ({ id, ...b })),
+    current: user ? activePlan(user.id) : null, has_key: !!(user && db.prepare('SELECT 1 FROM macro_keys WHERE user_id = ?').get(user.id)),
+  }),
+  'POST /api/subscriptions': async (req, res, user) => {
+    requireActive(user);
+    const b = await readBody(req);
+    const plan = PLANS[b.plan] ? b.plan : null;
+    if (!plan) return send(res, 400, { error: 'Choose a plan.' });
+    if (b.consent !== true) return send(res, 400, { field: 'consent', error: 'Please confirm you want access to start now.' });
+    const r = db.prepare('INSERT INTO subscriptions (user_id, plan, amount_cents, created_at) VALUES (?, ?, ?, ?)').run(user.id, plan, PLANS[plan].price, nowIso());
+    send(res, 200, { subscription_id: r.lastInsertRowid, payment: platformCharge('subscription', 'subscriptions', r.lastInsertRowid, PLANS[plan].price) });
+  },
+  'POST /api/subscriptions/:id/sync': (req, res, user, url, id) => {
+    requireUser(user);
+    if (!db.prepare('SELECT 1 FROM subscriptions WHERE id = ? AND user_id = ?').get(id, user.id)) return send(res, 404, { error: 'Not found.' });
+    activatePurchase('subscription', id);
+    send(res, 200, { current: activePlan(user.id) });
+  },
+  // Shows the macro key once; only its hash is stored.
+  'POST /api/macro-key': (req, res, user) => {
+    requireActive(user);
+    if (!activePlan(user.id)) return send(res, 403, { error: 'Subscribe to a macro plan first.' });
+    const key = 'mk_' + crypto.randomBytes(24).toString('hex');
+    db.prepare('INSERT OR REPLACE INTO macro_keys (user_id, key_hash, created_at) VALUES (?, ?, ?)').run(user.id, crypto.createHash('sha256').update(key).digest('hex'), nowIso());
+    send(res, 200, { key });
+  },
+  // ----- Macro API (used by the trade macro with its key) -----
+  'GET /api/macro/status': (req, res, user) => {
+    requireUser(user);
+    send(res, 200, { user: user.username, plan: activePlan(user.id) });
+  },
+  'GET /api/macro/orders': (req, res, user) => {
+    requireUser(user);
+    const plan = activePlan(user.id);
+    if (!plan) return send(res, 402, { error: 'No active macro subscription.' });
+    send(res, 200, { orders: db.prepare(`SELECT o.id, o.product_title, o.buyer_info, o.paid_at, l.game, l.delivers, u.username AS buyer FROM orders o
+      JOIN listings l ON l.id = o.listing_id JOIN users u ON u.id = o.buyer_id
+      WHERE o.seller_id = ? AND o.status = 'paid' AND o.seller_delivered_at IS NULL ORDER BY o.paid_at`).all(user.id) });
+  },
+  // Uses one automation from the monthly allowance. Calling it again for the same order is free.
+  'POST /api/macro/orders/:id/start': (req, res, user, url, id) => {
+    requireActive(user);
+    const plan = activePlan(user.id);
+    if (!plan) return send(res, 402, { error: 'No active macro subscription.' });
+    const o = db.prepare(`SELECT * FROM orders WHERE id = ? AND seller_id = ? AND status = 'paid'`).get(id, user.id);
+    if (!o) return send(res, 404, { error: 'Order not found or not waiting for delivery.' });
+    const already = db.prepare('SELECT 1 FROM macro_usage WHERE user_id = ? AND order_id = ?').get(user.id, id);
+    if (!already && plan.limit != null && plan.remaining <= 0) return send(res, 429, { error: `You've used all ${plan.limit} automated trades this month.` });
+    if (!already) db.prepare('INSERT INTO macro_usage (user_id, order_id, created_at) VALUES (?, ?, ?)').run(user.id, id, nowIso());
+    send(res, 200, { order: { id: o.id, buyer_username: o.buyer_info, product: o.product_title }, plan: activePlan(user.id),
+      next: 'Record the trade, upload it to POST /api/files, then POST /api/orders/:id/deliver with { file_id, recorded: true }.' });
+  },
   'GET /api/dashboard': (req, res, user) => {
     requireUser(user);
     releaseDue();
@@ -971,7 +1112,7 @@ const routes = {
         ORDER BY id DESC`).all(user.id).map((o) => orderView(o)),
       sales: sales.map(saleView),
       listings: db.prepare(`SELECT * FROM listings WHERE seller_id = ? AND (status != 'removed' OR removed_by = 'admin') ORDER BY id DESC`).all(user.id)
-        .map((l) => ({ ...parseImages(l), has_file: !!l.file_id })),
+        .map((l) => ({ ...parseImages(l), has_file: !!l.file_id, boosted_until: boostEnd(l.id) })),
       payouts: db.prepare('SELECT * FROM payouts WHERE seller_id = ? ORDER BY id DESC').all(user.id),
     });
   },
@@ -1187,7 +1328,9 @@ const server = http.createServer(async (req, res) => {
       const type = String(req.headers['content-type'] || '');
       const wantType = url.pathname === '/api/files' ? 'application/octet-stream' : 'application/json';
       if (req.method === 'POST' && !type.startsWith(wantType)) return send(res, 415, { error: 'Unsupported request type' });
-      return await m.handler(req, res, currentUser(req), url, m.id);
+      let who = currentUser(req);
+      if (!who && /^\/api\/(macro\/|files$|orders\/\d+\/deliver$)/.test(url.pathname)) who = macroUser(req);
+      return await m.handler(req, res, who, url, m.id);
     }
     if (url.pathname.startsWith('/uploads/')) return serveFile(res, path.join(UPLOAD_DIR, path.basename(url.pathname)));
     const file = path.join(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : path.normalize(url.pathname));
