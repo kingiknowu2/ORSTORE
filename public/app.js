@@ -1059,6 +1059,21 @@ function contactPage() {
 }
 
 // ---------- Router ----------
+// Header: search box and game links.
+$('#top-search').onsubmit = (e) => {
+  e.preventDefault();
+  const q = e.target.q.value.trim();
+  location.hash = '#/' + (q ? '?q=' + encodeURIComponent(q) : '');
+};
+async function loadGameBar() {
+  const { games } = await api('/listings');
+  const cur = hashParams().get('game') || '';
+  $('#gamebar').innerHTML = `<a href="#/" class="${!cur ? 'on' : ''}">All games</a>` + games.map((g) =>
+    `<a href="#/?game=${encodeURIComponent(g.game)}" class="${g.game.toLowerCase() === cur.toLowerCase() ? 'on' : ''}">${esc(g.game)}</a>`).join('')
+    + '<a href="#/sell" class="gb-sell">+ Sell an item</a>';
+}
+window.addEventListener('hashchange', () => loadGameBar().catch(() => {}));
+
 async function loadMe() { me = (await api('/me')).user; renderNav(); }
 
 async function route() {
@@ -1095,4 +1110,4 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
-Promise.all([api('/config').then((c) => { CFG = c; }), loadMe()]).then(route);
+Promise.all([api('/config').then((c) => { CFG = c; }), loadMe()]).then(() => { route(); loadGameBar().catch(() => {}); });

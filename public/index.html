@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#07080d">
+<meta name="theme-color" content="#0f1115">
 <title>Lootrova — The Premium Game Item Marketplace</title>
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="preload" href="/fonts/rubik.woff2" as="font" type="font/woff2" crossorigin>
@@ -16,13 +16,22 @@
 </div>
 
 <header class="topbar">
-  <div class="topbar-inner">
+  <div class="topstrip"><div class="topbar-inner">
+    <span>🛡 Buyer protection on every order · 10% seller fee · no buyer fees</span>
+    <span class="strip-links"><a href="#/sell">Sell on Lootrova</a><a href="#/policy/refunds">Refunds</a><a href="#/contact">Support</a></span>
+  </div></div>
+  <div class="topbar-inner mainbar">
     <a href="#/" class="logo" aria-label="Lootrova home">
-      <img src="/logo.svg" alt="" width="30" height="30">
+      <img src="/logo.svg" alt="" width="32" height="32">
       <span>Loot<b>rova</b></span>
     </a>
+    <form class="topsearch" id="top-search" role="search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input name="q" placeholder="Search games, skins, codes…" autocomplete="off" aria-label="Search">
+    </form>
     <nav id="nav"></nav>
   </div>
+  <div class="gamebar"><div class="topbar-inner" id="gamebar"></div></div>
 </header>
 
 <main id="app"></main>
@@ -53,10 +62,10 @@
     document.body.innerHTML = '<div style="max-width:560px;margin:60px auto;padding:28px;font:16px/1.6 system-ui,sans-serif;color:#f4f5f8;background:#10111a;border:1px solid #2a2f3d;border-radius:16px">'
       + '<h1 style="margin-top:0;font-size:1.5rem">Lootrova needs its server to run</h1>'
       + '<p>You opened this file directly, so the site can\'t load its styles, items or payments. Start the server instead:</p>'
-      + '<ol><li>Install Node.js 22 or newer from <a style="color:#a78bfa" href="https://nodejs.org">nodejs.org</a>.</li>'
+      + '<ol><li>Install Node.js 22 or newer from <a style="color:#ff6b6b" href="https://nodejs.org">nodejs.org</a>.</li>'
       + '<li>Open a terminal in the project folder (the one with <code>server.js</code>).</li>'
       + '<li>Run <code>npm start</code>.</li>'
-      + '<li>Open <a style="color:#a78bfa" href="http://localhost:3000">http://localhost:3000</a> in your browser.</li></ol></div>';
+      + '<li>Open <a style="color:#ff6b6b" href="http://localhost:3000">http://localhost:3000</a> in your browser.</li></ol></div>';
     document.body.style.background = '#07080d';
   } else {
     for (const src of ['/policies.js', '/app.js']) {
