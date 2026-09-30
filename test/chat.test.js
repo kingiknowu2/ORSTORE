@@ -76,3 +76,12 @@ test('our chat model handles messages it never trained on', () => {
   const right = HELD_OUT.filter((h) => predict(h.text, h.from).label === h.label).length;
   assert.ok(right / HELD_OUT.length >= 0.9, `${right}/${HELD_OUT.length}`);
 });
+
+test('1000 unseen messages: at least 95% right and no complaint read as "received"', () => {
+  const { build } = require('../ml/chat-test1000');
+  const rows = build(1000);
+  let right = 0, dangerous = 0;
+  for (const r of rows) { const g = classifyMessage(r.text, r.from).intent; if (g === r.label) right++; else if (g === 'received' && r.label !== 'neutral') dangerous++; }
+  assert.ok(right >= 950, `${right}/1000`);
+  assert.equal(dangerous, 0);
+});

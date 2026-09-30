@@ -11,7 +11,9 @@ const BUYER = {
     'trade went through', 'trade done thanks', 'smooth trade', 'ez trade', 'gg ty', 'perfect ty', 'amazing thanks', 'received everything', 'have it now', 'i have them now',
     'its in my inventory', 'it shows in my inventory now', 'just got it', 'finally got it ty', 'got it didnt expect it so fast', 'no problem got it', 'cant lie legit',
     'ngl w seller', 'confirmed got it', 'its here', 'its here now', 'here it is thanks', 'it showed up', 'showed up ty', 'yup its there', 'yessir', 'bet', 'bet ty', 'its in my backpack',
-    'see it now', 'i can see it now', 'ok i see it', 'arrived thank u', 'yh it worked', 'thanks man it worked', 'appreciate it got it', 'got it will buy again', '10/10 seller', 'love it thanks',
+    'see it now', 'i can see it now', 'ok i see it', 'arrived thank u', 'i have it now', 'i have the dragon now', 'i have the pet now', 'now i have it', 'it is in my inventory',
+    'the fruit is in my inventory', 'my pet is here now', 'the car is in my garage now', 'came safe', 'arrived safely', 'got here fine', 'got it no issues', 'got it no problems',
+    'nice got it', 'sweet got it', 'nice i have it', 'awesome it came', 'the huge is mine now', 'finally have my kitsune', 'my diamonds came', 'yh it worked', 'thanks man it worked', 'appreciate it got it', 'got it will buy again', '10/10 seller', 'love it thanks',
   ],
   not_received: [
     'didnt get it', 'did not get it', 'i didnt receive it', 'never got it', 'never received it', 'havent got it', 'havent received it', 'still havent got it',
@@ -20,7 +22,10 @@ const BUYER = {
     'it didnt come', 'it never came', 'it never arrived', 'it doesnt work', 'its not working', 'not working', 'wrong item', 'wrong pet', 'thats the wrong one', 'it came but wrong pet',
     'u never sent it', 'you didnt send it', 'nothing yet', 'havnt got it', 'got it? no i didnt', 'thanks but i never got it', 'ty but it didnt come', 'hasnt arrived',
     'bro i dont have it', 'my inventory is empty', 'the pet isnt there', 'i checked and its not there', 'you sent the wrong thing', 'only got half', 'missing some items',
-    'i got the wrong amount', 'havent seen it', 'i havent seen any trade', 'dont see anything', 'cant see it', 'not seeing it', 'it isnt here', 'its not here', 'not showing up',
+    'i got the wrong amount', 'no pet', 'no fruit', 'no diamonds', 'no huge', 'no car', 'checked no pet', 'looked everywhere nothing', 'looked and its not there',
+    'its been ages still nothing', 'looked again, no pet', 'i checked, no fruit', 'searched my inv, no huge', 'the pet isnt in my inventory', 'my fruit isnt in my backpack',
+    'the car isnt in my garage', 'havent gotten it yet', 'i havent gotten the pet', 'havent gotten anything', 'you didnt trade me', 'u didnt give me the pet', 'you never traded me',
+    'whre is it', 'wher is my pet', 'were is my fruit', 'where is the pet??', 'been waiting an hour', 'been 30 mins nothing', 'inventory checked, nothing', 'no dragon in my inventory', 'i dont see my fruit', 'havent seen it', 'i havent seen any trade', 'dont see anything', 'cant see it', 'not seeing it', 'it isnt here', 'its not here', 'not showing up',
     'not all of it came', 'it disappeared', 'i didnt even get a trade request', 'you never joined', 'you left the game',
   ],
   scam_claim: [
@@ -32,7 +37,9 @@ const BUYER = {
     'hi', 'hello', 'hey', 'yo', 'sup', 'ok', 'okay', 'k', 'hmm ok', 'lol', 'lmao', 'bruh', 'whats your username', 'whats ur user', 'what time are you online',
     'are you online', 'when can you trade', 'can you trade now', 'im online now', 'join me', 'add me', 'my username is kidcool', 'my user is coolkid123', 'friend me',
     'which server', 'what server', 'send me the link', 'how long will it take', 'is it still available', 'ok wait', 'one sec', 'brb', 'im at school', 'can we do it later',
-    'im in the game', 'in game now', 'im online in roblox', 'im in your server', 'joining now', 'im here', 'ready when you are', 'ok im ready',
+    'do you have any more', 'got any more in stock', 'do u have more pets', 'can i buy another', 'is this in stock', 'still available?', 'do you sell kitsune',
+    'do you have the leopard', 'do you have more of these', 'any more huges', 'how much for another one', 'is the fruit available', 'my roblox name is epicgamer123',
+    'my username is xx_proplayer_xx', 'user: noobmaster69', 'im in the game', 'in game now', 'im online in roblox', 'im in your server', 'joining now', 'im here', 'ready when you are', 'ok im ready',
     'he said he sent it', 'she says its done', 'the seller said he sent it', 'let me check', 'checking', 'i will check', 'wait', 'where do i join', 'what do i do',
   ],
 };

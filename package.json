@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.js",
-    "train": "node ml/train-chat.js"
+    "train": "node ml/train-chat.js",
+    "eval": "node ml/eval-big.js 50000"
   },
   "dependencies": {
     "@tensorflow/tfjs": "^4.22.0",
