@@ -1351,7 +1351,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) {
-  server.listen(PORT, () => console.log(`Lootrova running on http://localhost:${PORT}`));
+  server.listen(PORT, () => {
+    console.log(`Lootrova running on http://localhost:${PORT}`);
+    require('./demo-seed').seed(`http://localhost:${PORT}`, db).catch((e) => console.error('Demo seed failed', e.message));
+  });
   ai.warmUp(); // load the NSFW model in the background
 }
 module.exports = server;

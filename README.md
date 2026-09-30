@@ -80,3 +80,11 @@ Subscribers create a key on the Macro page. The macro sends it as `Authorization
 | `POST /api/macro/orders/:id/start` | Uses one automated trade (free if already started for that order); returns 429 when the monthly limit is reached |
 | `POST /api/files` | Upload the trade recording (raw bytes, `X-File-Name: trade.mp4`) and get a `file_id` |
 | `POST /api/orders/:id/deliver` | `{ "file_id": ..., "recorded": true }` confirms delivery with the recording |
+
+## Put it online (view it on your phone)
+The repo includes `render.yaml` for [Render](https://render.com) (free plan):
+1. Sign in to Render with GitHub, choose **New → Blueprint**, and pick this repository.
+2. Set `ADMIN_USERS` to the username you'll sign up with.
+3. Deploy. Render gives you a public link like `https://lootrova.onrender.com`.
+
+`DEMO_SEED=1` fills an empty site with sample listings and orders (demo logins: `NovaTrades`, `PixelForge`, `kai_buys`, `zoe_plays`, password `demo-password`). Remove it before real launch. On the free plan the site sleeps when unused (first visit takes ~1 minute) and the database resets on each redeploy.
