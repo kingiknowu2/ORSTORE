@@ -62,8 +62,8 @@ function avatar(name, cls = '') {
 function art(game) {
   const h = hue(game);
   const initials = String(game).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-  const bg = CFG.theme === 'petvault' // soft, muted tones for the light PetVault look
-    ? `linear-gradient(160deg,hsl(${h} 35% 92%),hsl(${(h + 30) % 360} 30% 82%))`
+  const bg = CFG.theme === 'petvault' // deep, low-glare tones for the dark PetVault look
+    ? `radial-gradient(circle at 50% 35%,hsl(${h} 45% 26%),hsl(${(h + 30) % 360} 40% 11%))`
     : `repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 14px,transparent 14px 28px),linear-gradient(160deg,hsl(${h} 42% 34%),hsl(${(h + 25) % 360} 45% 14%))`;
   return `<div class="art" style="background:${bg}"><span>${esc(initials)}</span></div>`;
 }
@@ -315,52 +315,66 @@ const skeletons = (n) => Array.from({ length: n }, () => `
   <div class="sk" style="height:14px;width:50%;margin-top:18px"></div></div></div>`).join('');
 
 const card = (l, i) => `
-  <a class="card reveal" style="--i:${i}" href="#/item/${l.id}">
-    <div class="media">${cover(l)}<span class="badge">${esc(l.game)}</span>${l.boosted_until ? '<span class="boost-badge">⚡ Boosted</span>' : ''}
+  <a class="card reveal" style="--i:${i}" href="#/item/${l.id}"${CFG.theme === 'petvault' ? ` data-tier="${petTier(l.title).id}"` : ''}>
+    <div class="media">${cover(l)}${CFG.theme === 'petvault' ? tierTag(l.title) : `<span class="badge">${esc(l.game)}</span>`}${l.boosted_until ? '<span class="boost-badge">⚡ Boosted</span>' : ''}
       ${l.images.length > 1 ? `<span class="img-count">${icon.image}${l.images.length}</span>` : ''}</div>
     <div class="body"><h3>${esc(l.title)}</h3>
       <div class="foot"><div class="seller">${avatar(l.seller)}<span>${esc(l.seller)}</span>${rating(l.seller_rating)}</div>
         <div class="price">${money(l.price_cents)}</div></div></div>
   </a>`;
 
-// PetVault's home: a Pet Simulator 99 storefront with its own hero, featured panel, category shortcuts and copy.
-const PET_CATEGORIES = [['Huge pets', 'huge'], ['Titanics', 'titanic'], ['Diamonds', 'diamonds'], ['Eggs', 'egg'], ['Rainbow', 'rainbow'], ['Shiny', 'shiny']];
+// PetVault sorts every listing into a Pet Simulator 99 rarity tier, shown as a coloured tag. Items are checked
+// before pets ("Huge Machine Eggs" are eggs), then the first matching tier wins.
+const PET_TIER_ORDER = ['egg', 'diamonds', 'titanic', 'huge', 'exclusive'];
+const PET_TIERS = [
+  { id: 'titanic', label: 'Titanic', q: 'titanic', re: /titanic/i },
+  { id: 'huge', label: 'Huge', q: 'huge', re: /\bhuge/i },
+  { id: 'exclusive', label: 'Exclusive', q: 'exclusive', re: /exclusive/i },
+  { id: 'egg', label: 'Eggs', q: 'egg', re: /\beggs?\b/i },
+  { id: 'diamonds', label: 'Diamonds', q: 'diamonds', re: /diamond|\bgems?\b/i },
+];
+const PET_VARIANTS = [{ id: 'rainbow', label: 'Rainbow', re: /rainbow/i }, { id: 'shiny', label: 'Shiny', re: /shiny/i }, { id: 'golden', label: 'Golden', re: /golden|\bgold\b/i }];
+const petTier = (title) => PET_TIER_ORDER.map((id) => PET_TIERS.find((t) => t.id === id)).find((t) => t.re.test(title)) || { id: 'pet', label: 'Pet' };
+const tierTag = (title) => {
+  const t = petTier(title), v = PET_VARIANTS.find((x) => x.re.test(title));
+  return `<span class="tier tier-${t.id}${v ? ' v-' + v.id : ''}">${esc(t.label)}${v ? `<i>${esc(v.label)}</i>` : ''}</span>`;
+};
 function petHome(p) {
+  const ticks = Array.from({ length: 60 }, (_, i) => `<line x1="100" y1="${i % 5 ? 8 : 4}" x2="100" y2="${i % 5 ? 13 : 17}" transform="rotate(${i * 6} 100 100)"/>`).join('');
   return `
     <section class="pv-hero reveal">
       <div class="pv-hero-copy">
-        <span class="eyebrow">${esc(CFG.games[0] || 'Pet')} marketplace</span>
-        <h1>Trade pets with confidence.</h1>
-        <p class="lead">Huges, Titanics, diamonds and eggs from verified traders. Payment is held in escrow until the trade is confirmed on both sides.</p>
+        <span class="pv-kicker"><i></i>${esc(CFG.games[0] || 'Pet')} · escrow marketplace</span>
+        <h1>Every pet, <em>locked in</em> until the trade lands.</h1>
+        <p class="lead">Buy and sell Huges, Titanics, eggs and diamonds. Your payment sits in the vault and only opens once both sides confirm the trade.</p>
         <form class="search pv-search" id="search">${icon.search}
-          <input name="q" placeholder="Search Huge Cat, Titanic, 10B diamonds…" value="${esc(p.get('q') || '')}" autocomplete="off">
+          <input name="q" placeholder="Search Titanic, Huge Cat, 10B diamonds…" value="${esc(p.get('q') || '')}" autocomplete="off">
           <button class="btn">Search</button></form>
-        <div class="pv-popular"><span>Popular:</span>${PET_CATEGORIES.slice(0, 4).map(([label, q]) => `<a href="#/?q=${encodeURIComponent(q)}">${esc(label)}</a>`).join('')}</div>
+        <dl class="pv-readout">
+          <div><dt>Listings</dt><dd data-stat="live">0</dd></div>
+          <div><dt>Sellers</dt><dd data-stat="sellers">0</dd></div>
+          <div><dt>Trades closed</dt><dd data-stat="completed">0</dd></div>
+          <div><dt>Protection</dt><dd>${CFG.hold_days}d</dd></div>
+        </dl>
       </div>
-      <aside class="pv-featured">
-        <div class="pv-featured-head"><b>Featured listings</b><span class="pv-live"><i></i>Live</span></div>
-        <div class="hero-art" id="hero-art"></div>
-      </aside>
+      <div class="pv-vault">
+        <svg class="pv-dial" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="96"/><g>${ticks}</g><circle class="pv-dial-inner" cx="100" cy="100" r="74"/></svg>
+        <div class="pv-pick" id="hero-art"></div>
+      </div>
     </section>
-    <section class="pv-metrics reveal">
-      <div><b data-stat="live">0</b><span>Active listings</span></div>
-      <div><b data-stat="sellers">0</b><span>Verified sellers</span></div>
-      <div><b data-stat="completed">0</b><span>Completed trades</span></div>
-      <div><b>${CFG.hold_days} days</b><span>Buyer protection</span></div>
-    </section>
-    <nav class="pv-cats" aria-label="Browse by category"><span class="pv-cats-label">Browse</span>${PET_CATEGORIES.map(([label, q]) =>
-      `<a class="pv-cat" href="#/?q=${encodeURIComponent(q)}">${esc(label)}</a>`).join('')}</nav>
+    <section class="pv-tiers" aria-label="Browse by rarity">${PET_TIERS.map((t) =>
+      `<a class="pv-tier" data-tier="${t.id}" href="#/?q=${encodeURIComponent(t.q)}"><span class="pv-tier-bar"></span><b>${esc(t.label)}</b><small data-tier-count="${t.id}">–</small></a>`).join('')}</section>
     <div id="feed"></div>
-    <div class="section-head"><div><span class="eyebrow">Marketplace</span><h2 id="results-title">Newest listings</h2></div>
+    <div class="section-head"><div><span class="eyebrow">In the vault</span><h2 id="results-title">Newest listings</h2></div>
       <div class="chips" id="chips"></div></div>
     <div class="grid" id="results">${skeletons(8)}</div>
-    <section class="pv-steps">
-      <div class="pv-steps-head"><span class="eyebrow">Escrow protection</span><h2>How every trade is protected</h2></div>
-      <ol>${[[icon.lock, 'Pay into escrow', 'Your payment is held by ' + esc(CFG.name) + ', never sent straight to the seller.'],
-             [icon.chat, 'Seller delivers', 'The seller trades the pet to your Roblox username and uploads a recording of the trade.'],
-             [icon.check, 'Both sides confirm', `The seller is paid only after you confirm. If anything is wrong, a case opens within ${CFG.hold_days} days.`]]
-        .map(([ic, t, d], i) => `<li class="reveal" style="--i:${i}"><span class="pv-step-ic">${ic}</span><b>${t}</b><p>${d}</p></li>`).join('')}</ol>
-      <p class="fine">Listing is free. Sellers pay a flat ${feePct()} fee only when a sale completes. Buyers pay no fees.</p>
+    <section class="pv-flow">
+      <h2>How the vault works</h2>
+      <ol>${[['Locked', 'You pay and the money is locked in the vault. The seller can see it’s there but can’t touch it.'],
+             ['Traded', 'The seller trades the pet to your Roblox username and uploads a recording of the trade as proof.'],
+             ['Released', `You confirm and the vault opens for the seller. A problem? A case opens and the money stays locked for up to ${CFG.hold_days} days.`]]
+        .map(([t, d], i) => `<li class="reveal" style="--i:${i}"><span class="pv-flow-n">0${i + 1}</span><b>${t}</b><p>${d}</p></li>`).join('')}</ol>
+      <p class="fine">Listing is free. Sellers pay ${feePct()} when a sale is released. Buyers pay nothing extra.</p>
     </section>`;
 }
 
@@ -434,9 +448,14 @@ async function loadResults(first) {
   if (tiles && first) tiles.innerHTML = data.games.slice(0, 6).map((g, i) => `<a class="game-tile reveal" style="--i:${i}" href="${chipHref(g.game)}">${art(g.game)}
     <span class="gt-name">${esc(g.game)}</span><span class="gt-count">${g.count} item${g.count === 1 ? '' : 's'}</span></a>`).join('') || '<p class="muted">Games appear here once items are listed.</p>';
   const heroArt = $('#hero-art');
-  if (heroArt && first && CFG.theme === 'petvault') heroArt.innerHTML = data.listings.slice(0, 4).map((l) => `<a class="pv-feat" href="#/item/${l.id}">
-    <span class="pv-feat-th">${cover(l)}</span><span class="pv-feat-main"><b>${esc(l.title)}</b><small>${esc(l.seller)}</small></span>
-    <span class="pv-feat-price">${money(l.price_cents)}</span></a>`).join('') || '<p class="muted">Listings appear here once sellers add them.</p>';
+  if (heroArt && first && CFG.theme === 'petvault') {
+    // The dial shows the most valuable listing; the rarity tiles count what's listed in each tier.
+    const top = [...data.listings].sort((a, b) => b.price_cents - a.price_cents)[0];
+    heroArt.innerHTML = top ? `<a class="pv-pick-card" href="#/item/${top.id}"><span class="pv-pick-label">Top of the vault</span>
+      <span class="pv-pick-th">${cover(top)}</span>${tierTag(top.title)}<b>${esc(top.title)}</b><span class="pv-pick-price">${money(top.price_cents)}</span></a>`
+      : '<p class="pv-pick-empty">The vault is empty. List the first pet.</p>';
+    if (!q) PET_TIERS.forEach((t) => { const el = $(`[data-tier-count="${t.id}"]`); if (el) el.textContent = `${data.listings.filter((l) => petTier(l.title).id === t.id).length} listed`; });
+  }
   else if (heroArt && first) heroArt.innerHTML = data.listings.slice(0, 3).map((l, i) => `<a class="hero-card hc-${i}" href="#/item/${l.id}">${cover(l)}
     <span class="hc-info"><b>${esc(l.title)}</b><span>${money(l.price_cents)}</span></span></a>`).join('');
   $('#results-title').textContent = q || game ? `${data.listings.length} result${data.listings.length === 1 ? '' : 's'}` : CFG.theme === 'petvault' ? 'Newest listings' : 'Latest drops';
@@ -496,7 +515,7 @@ async function itemPage(id) {
           `<button class="${i ? '' : 'on'}" data-src="${esc(src)}" aria-label="Image ${i + 1}"><img src="${esc(src)}" alt=""></button>`).join('')}</div>` : ''}
       </div>
       <div class="info glass reveal" style="--i:1">
-        <span class="eyebrow">${esc(l.game)}</span>
+        <span class="eyebrow">${esc(l.game)}</span>${CFG.theme === 'petvault' ? tierTag(l.title) : ''}
         <h1>${esc(l.title)}</h1>
         <div class="sold-by">${avatar(l.seller)}<span>Sold by <a href="#/u/${encodeURIComponent(l.seller)}" style="color:var(--text);font-weight:700">${esc(l.seller)}</a></span>${rating(l.seller_rating, l.seller_reviews)}</div>
         <div class="price">${money(l.price_cents)}</div>

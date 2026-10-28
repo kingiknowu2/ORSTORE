@@ -60,3 +60,13 @@ test('pages are served with the PetVault theme, logo and name', async () => {
   assert.doesNotMatch(html.replace(/<script>[\s\S]*<\/script>/, ''), /Lootrova/);
   assert.equal((await fetch(BASE + '/themes/petvault/theme.css')).status, 200);
 });
+
+test('PetVault sorts listings into Pet Sim rarity tiers', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const start = src.indexOf('const PET_TIER_ORDER'), end = src.indexOf('const tierTag');
+  const petTier = new Function(`${src.slice(start, end)}; return petTier;`)();
+  const tiers = Object.fromEntries(['50 Huge Machine Eggs', 'Huge Rainbow Cat', 'Titanic Blobfish', '10B Diamonds', 'Exclusive Wizard Dog', 'Golden Cat']
+    .map((t) => [t, petTier(t).id]));
+  assert.deepEqual(tiers, { '50 Huge Machine Eggs': 'egg', 'Huge Rainbow Cat': 'huge', 'Titanic Blobfish': 'titanic',
+    '10B Diamonds': 'diamonds', 'Exclusive Wizard Dog': 'exclusive', 'Golden Cat': 'pet' });
+});
