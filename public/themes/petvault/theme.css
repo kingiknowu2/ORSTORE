@@ -39,7 +39,7 @@
 [data-theme="petvault"] a:focus-visible, [data-theme="petvault"] button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
 /* ---------- Header ---------- */
-[data-theme="petvault"] .topstrip { background: #06080b; color: var(--muted); }
+[data-theme="petvault"] .topstrip { display: none; } /* Macro, Refunds and Support are in the footer */
 [data-theme="petvault"] .topbar, [data-theme="petvault"] .gamebar { background: #0c1016; }
 [data-theme="petvault"] .logo b { color: var(--teal) !important; }
 [data-theme="petvault"] .logo:hover img { transform: rotate(90deg); }
@@ -173,3 +173,4 @@
   .pv-tiers { grid-template-columns: repeat(2, 1fr); }
   .pv-flow ol { grid-template-columns: 1fr; }
 }
+@media (min-width: 901px) { [data-theme="petvault"] .info, [data-theme="petvault"] .preview-col { top: 136px; } } /* header is shorter without the top strip */
