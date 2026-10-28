@@ -21,7 +21,16 @@ Opening `public/index.html` directly from disk won't work. The site needs the se
 | `HOLD_DAYS` | `7` | Days seller earnings stay pending (buyer protection) |
 | `NSFW_DISABLED` | off | Set to `1` to turn off image screening and automatic case scoring (e.g. for fast tests) |
 | `SUPPORT_EMAIL` | none | Shown on the Contact page |
+| `STORE_NAME` | `Lootrova` | Store name shown across the site, receipts and policies |
+| `STORE_GAMES` | all games | Comma-separated games this store sells, e.g. `Pet Simulator 99` |
 | `DB_PATH`, `UPLOAD_DIR`, `FILES_DIR` | project folder | Where the database, public images and private product files are stored |
+
+## Running more than one store
+The same code can run several separate stores. Each one is its own server process with its own name, games and database:
+
+    STORE_NAME=PetVault STORE_GAMES="Pet Simulator 99" DB_PATH=petvault.db UPLOAD_DIR=uploads-petvault FILES_DIR=storage/petvault PORT=3001 npm start
+
+**PetVault** is the second store: a Pet Simulator 99-only marketplace. It works the same way as Lootrova (checkout, buyer protection, cases, boosts, macro), but sellers can only list Pet Sim items. `render.yaml` deploys it as a second site next to Lootrova. Accounts, listings and money are separate between the two stores.
 
 ## How buying works
 1. The product page shows the price, seller, what the buyer receives, file type, compatibility, requirements and licence, with a **Buy now** button.

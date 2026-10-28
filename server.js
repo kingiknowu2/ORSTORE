@@ -8,7 +8,7 @@ const { createSandboxProvider } = require('./payments');
 const ai = require('./moderation');
 
 const PORT = process.env.PORT || 3000;
-const FEE_RATE = 0.10;       // Lootrova keeps 10% of every successful sale, taken from the seller's share
+const FEE_RATE = 0.10;       // the store keeps 10% of every successful sale, taken from the seller's share
 const BUYER_FEE_CENTS = 0;   // Buyers pay exactly the listed price
 const CURRENCY = (process.env.CURRENCY || 'GBP').toUpperCase();
 const HOLD_DAYS = Number(process.env.HOLD_DAYS ?? 7); // earnings stay pending this long unless the buyer confirms sooner
@@ -25,7 +25,23 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(FILES_DIR, { recursive: true });
 
 // Launch catalogue: Roblox experiences only. New games are added here.
-const GAMES = ['Pet Simulator 99', 'Steal a Brainrot', 'Jailbreak', 'Blox Fruits'];
+const ALL_GAMES = ['Pet Simulator 99', 'Steal a Brainrot', 'Jailbreak', 'Blox Fruits'];
+// The same code can run more than one store: STORE_NAME brands it, STORE_GAMES limits it to some games
+// (e.g. STORE_NAME=PetVault STORE_GAMES="Pet Simulator 99"). Each store needs its own DB_PATH.
+const STORE_NAME = (process.env.STORE_NAME || 'Lootrova').trim();
+const GAMES = process.env.STORE_GAMES
+  ? process.env.STORE_GAMES.split(',').map((g) => ALL_GAMES.find((x) => x.toLowerCase() === g.trim().toLowerCase())).filter(Boolean)
+  : ALL_GAMES;
+if (!GAMES.length) throw new Error(`STORE_GAMES must name at least one of: ${ALL_GAMES.join(', ')}`);
+// STORE_THEME picks a look from public/themes/<name>/ (theme.css on top of the base styles, plus logo.svg).
+const STORE_THEME = (process.env.STORE_THEME || '').trim().toLowerCase();
+if (STORE_THEME && !(/^[a-z0-9-]+$/.test(STORE_THEME) && fs.existsSync(path.join(__dirname, 'public', 'themes', STORE_THEME, 'theme.css')))) {
+  throw new Error(`STORE_THEME "${STORE_THEME}" has no public/themes/${STORE_THEME}/theme.css`);
+}
+const LOGO_URL = STORE_THEME && fs.existsSync(path.join(__dirname, 'public', 'themes', STORE_THEME, 'logo.svg')) ? `/themes/${STORE_THEME}/logo.svg` : '/logo.svg';
+// The logo shows the name in two tones: "PetVault" → Pet|Vault, "Lootrova" → Loot|rova.
+const NAME_CUT = STORE_NAME.slice(1).search(/[A-Z]/) + 1 || Math.ceil(STORE_NAME.length / 2);
+const NAME_PARTS = [STORE_NAME.slice(0, NAME_CUT), STORE_NAME.slice(NAME_CUT)];
 const MIN_SALES_FOR_DELIVERY_STAT = 4;
 const ONLINE_TIMEOUT_MS = 5 * 60 * 1000;
 // Paid extras. Prices in minor units of CURRENCY.
@@ -654,7 +670,7 @@ const getOrderFor = (id, user, role) => {
 // ---------- API routes ----------
 const routes = {
   'GET /api/config': (req, res) => send(res, 200, {
-    games: GAMES, platform: 'Roblox', ai_review: ai.enabled(), min_sales_for_delivery_stat: MIN_SALES_FOR_DELIVERY_STAT,
+    name: STORE_NAME, name_parts: NAME_PARTS, theme: STORE_THEME || null, logo: LOGO_URL, games: GAMES, platform: 'Roblox', ai_review: ai.enabled(), min_sales_for_delivery_stat: MIN_SALES_FOR_DELIVERY_STAT,
     currency: CURRENCY, fee_rate: FEE_RATE, buyer_fee_cents: BUYER_FEE_CENTS, hold_days: HOLD_DAYS, min_payout_cents: MIN_PAYOUT_CENTS,
     test_mode: payments.testMode, test_cards: payments.testCards, licences: LICENCES, report_categories: REPORT_CATEGORIES,
     allowed_file_types: ALLOWED_FILE_TYPES, max_file_mb: MAX_FILE_BYTES / 1024 / 1024, support_email: process.env.SUPPORT_EMAIL || null,
@@ -721,7 +737,7 @@ const routes = {
     if (!ALLOWED_FILE_TYPES.includes(ext)) return send(res, 400, { error: `.${ext || '?'} files aren’t allowed. Allowed types: ${ALLOWED_FILE_TYPES.join(', ')}.` });
     if (!buf) return send(res, 413, { error: `Files must be ${MAX_FILE_BYTES / 1024 / 1024} MB or smaller.` });
     if (!buf.length) return send(res, 400, { error: 'That file is empty.' });
-    if (looksExecutable(buf)) return send(res, 400, { error: 'Programs and scripts can’t be sold on Lootrova.' });
+    if (looksExecutable(buf)) return send(res, 400, { error: `Programs and scripts can’t be sold on ${STORE_NAME}.` });
     const stored = crypto.randomBytes(16).toString('hex') + '.' + ext;
     fs.writeFileSync(path.join(FILES_DIR, stored), buf);
     const r = db.prepare('INSERT INTO files (owner_id, stored_name, original_name, ext, size, created_at) VALUES (?, ?, ?, ?, ?, ?)')
@@ -975,7 +991,7 @@ const routes = {
   'POST /api/orders/:id/refund': (req, res, user, url, id) => {
     requireUser(user);
     const o = getOrderFor(id, user, 'seller');
-    reverseOrder(o, 'refund', user.role === 'admin' && o.seller_id !== user.id ? 'Refunded by Lootrova support' : 'Refunded by seller');
+    reverseOrder(o, 'refund', user.role === 'admin' && o.seller_id !== user.id ? `Refunded by ${STORE_NAME} support` : 'Refunded by seller');
     send(res, 200, { ok: true });
   },
 
@@ -1168,7 +1184,7 @@ const routes = {
       users: db.prepare(`SELECT id, username, role, status, suspended_reason, created_at,
         (SELECT COUNT(*) FROM listings WHERE seller_id = users.id AND status = 'active') AS active_listings FROM users ORDER BY id DESC LIMIT 200`).all(),
       listings: db.prepare(LISTING_SELECT + ' ORDER BY l.id DESC LIMIT 200').all().map((l) => ({ id: l.id, title: l.title, seller: l.seller, seller_id: l.seller_id, status: l.status, removed_by: l.removed_by, removal_reason: l.removal_reason })),
-      transactions: db.prepare('SELECT * FROM ledger ORDER BY id DESC LIMIT 300').all().map((t) => ({ ...t, user: t.user_id ? name(t.user_id) : 'Lootrova' })),
+      transactions: db.prepare('SELECT * FROM ledger ORDER BY id DESC LIMIT 300').all().map((t) => ({ ...t, user: t.user_id ? name(t.user_id) : STORE_NAME })),
       support: db.prepare('SELECT * FROM support_messages ORDER BY id DESC LIMIT 100').all(),
       platform_fees_cents: db.prepare(`SELECT COALESCE(SUM(amount_cents), 0) AS n FROM ledger WHERE bucket = 'platform'`).get().n,
     });
@@ -1209,7 +1225,7 @@ const routes = {
   },
   'POST /api/admin/orders/:id/reject-dispute': (req, res, user, url, id) => {
     requireAdmin(user);
-    const r = db.prepare(`UPDATE orders SET status = 'paid', note = 'Refund request reviewed and declined by Lootrova support' WHERE id = ? AND status = 'disputed'`).run(id);
+    const r = db.prepare(`UPDATE orders SET status = 'paid', note = ? WHERE id = ? AND status = 'disputed'`).run(`Refund request reviewed and declined by ${STORE_NAME} support`, id);
     send(res, r.changes ? 200 : 400, r.changes ? { ok: true } : { error: 'This order has no open refund request.' });
   },
   // Records a chargeback reported by the payment provider.
@@ -1260,9 +1276,19 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
+const INDEX_FILE = path.join(PUBLIC_DIR, 'index.html');
+// Pages leave the server already branded and themed, so the default look never flashes before the app loads.
+const themeHead = () => (STORE_THEME ? `<link rel="stylesheet" href="/themes/${STORE_THEME}/theme.css">` : '');
+function brandPage(html) {
+  return html.replace(/Loot<b>rova<\/b>/g, `${escHtml(NAME_PARTS[0])}<b>${escHtml(NAME_PARTS[1])}</b>`)
+    .replaceAll('Lootrova', escHtml(STORE_NAME)).replaceAll('/logo.svg', LOGO_URL)
+    .replace('<html lang="en">', STORE_THEME ? `<html lang="en" data-theme="${STORE_THEME}">` : '<html lang="en">')
+    .replace('<link rel="stylesheet" href="/style.css">', '<link rel="stylesheet" href="/style.css">' + themeHead());
+}
 function serveFile(res, file, fallback) {
   fs.readFile(file, (err, data) => {
     if (err) return fallback ? serveFile(res, fallback) : send(res, 404, { error: 'Not found' });
+    if (file === INDEX_FILE) data = brandPage(data.toString());
     const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' };
     if (file.startsWith(UPLOAD_DIR)) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
     res.writeHead(200, headers);
@@ -1272,11 +1298,11 @@ function serveFile(res, file, fallback) {
 const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function deniedPage(res, code, title, text) {
   res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  res.end(brandPage(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escHtml(title)} — Lootrova</title><link rel="stylesheet" href="/style.css"></head><body>
 <main><div class="auth-wrap"><div class="auth glass" style="text-align:center"><img class="logo-mark" src="/logo.svg" alt="">
 <h1>${escHtml(title)}</h1><p class="sub">${escHtml(text)}</p><a class="btn block" href="/#/dashboard?tab=library">Go to my library</a>
-<p class="switch"><a href="/#/contact">Contact support</a></p></div></div></main></body></html>`);
+<p class="switch"><a href="/#/contact">Contact support</a></p></div></div></main></body></html>`));
 }
 // Every download is checked against the logged-in buyer and the order's payment state.
 // Case evidence is visible only to the order's buyer, seller and admins.
@@ -1359,7 +1385,7 @@ const server = http.createServer(async (req, res) => {
 
 if (require.main === module) {
   server.listen(PORT, () => {
-    console.log(`Lootrova running on http://localhost:${PORT}`);
+    console.log(`${STORE_NAME} running on http://localhost:${PORT}`);
     require('./demo-seed').seed(`http://localhost:${PORT}`, db).catch((e) => console.error('Demo seed failed', e.message));
   });
   ai.warmUp(); // load the NSFW model in the background

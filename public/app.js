@@ -3,7 +3,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const app = $('#app');
 const nav = $('#nav');
 const MAX_IMAGES = 4;
-let CFG = { currency: 'GBP', fee_rate: 0.1, buyer_fee_cents: 0, hold_days: 7, min_payout_cents: 100, test_mode: false, test_cards: [], licences: {}, report_categories: {}, allowed_file_types: [], max_file_mb: 50 };
+let CFG = { name: 'Lootrova', name_parts: ['Loot', 'rova'], logo: '/logo.svg', theme: null, games: [], currency: 'GBP', fee_rate: 0.1, buyer_fee_cents: 0, hold_days: 7, min_payout_cents: 100, test_mode: false, test_cards: [], licences: {}, report_categories: {}, allowed_file_types: [], max_file_mb: 50 };
 let me = null;
 let currentView = '';
 
@@ -15,6 +15,7 @@ const fmtDate = (s) => (s ? toDate(s).toLocaleDateString('en-GB', { day: 'numeri
 const fmtDateTime = (s) => (s ? toDate(s).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 const fileSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const feeOf = (c) => Math.round(c * CFG.fee_rate);
+const listOf = (a) => a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a.at(-1) : a.join('');
 const feePct = () => Math.round(CFG.fee_rate * 100) + '%';
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 
@@ -61,7 +62,10 @@ function avatar(name, cls = '') {
 function art(game) {
   const h = hue(game);
   const initials = String(game).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-  return `<div class="art" style="background:repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 14px,transparent 14px 28px),linear-gradient(160deg,hsl(${h} 42% 34%),hsl(${(h + 25) % 360} 45% 14%))"><span>${esc(initials)}</span></div>`;
+  const bg = CFG.theme === 'petvault' // candy pastels for the light PetVault look
+    ? `radial-gradient(circle at 30% 25%,rgba(255,255,255,.55) 0 18%,transparent 19%),linear-gradient(160deg,hsl(${h} 90% 78%),hsl(${(h + 40) % 360} 85% 66%))`
+    : `repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 14px,transparent 14px 28px),linear-gradient(160deg,hsl(${h} 42% 34%),hsl(${(h + 25) % 360} 45% 14%))`;
+  return `<div class="art" style="background:${bg}"><span>${esc(initials)}</span></div>`;
 }
 const imgOf = (l) => (l.images ? l.images[0] : l.image);
 const cover = (l) => (imgOf(l) ? `<img src="${esc(imgOf(l))}" alt="" loading="lazy">` : art(l.game));
@@ -267,7 +271,7 @@ async function macroPage() {
     <div class="plans">${d.plans.map((p) => `<div class="plan glass ${p.monthly_limit == null ? 'best' : ''}">
         ${p.monthly_limit == null ? '<span class="plan-tag">Best for big sellers</span>' : ''}
         <h3>${esc(p.name)}</h3><div class="price">${money(p.price)}<small> /month</small></div>
-        <ul><li>${esc(p.blurb)}</li><li>Automatic trade recording</li><li>Auto-confirms delivery with the recording</li><li>Works with Pet Simulator 99, Steal a Brainrot, Jailbreak and Blox Fruits</li></ul>
+        <ul><li>${esc(p.blurb)}</li><li>Automatic trade recording</li><li>Auto-confirms delivery with the recording</li><li>Works with ${esc(listOf(CFG.games))}</li></ul>
         <button class="btn block ${cur?.plan === p.id ? 'ghost' : ''}" data-plan="${p.id}" ${cur?.plan === p.id ? 'disabled' : ''}>${cur?.plan === p.id ? 'Current plan' : cur ? 'Switch to this plan' : 'Subscribe'}</button></div>`).join('')}</div>
     <p class="fine">Plans last 30 days from payment. Switching plans starts a new 30-day period. Automated trades still follow the same rules as manual ones: the recording is uploaded as delivery proof.</p>`;
   $$('[data-plan]').forEach((b) => (b.onclick = async () => {
@@ -319,14 +323,53 @@ const card = (l, i) => `
         <div class="price">${money(l.price_cents)}</div></div></div>
   </a>`;
 
+// PetVault's home: a Pet Simulator 99 storefront with its own hero, category shortcuts and copy.
+const PET_CATEGORIES = [['🐾', 'Huges', 'huge'], ['👑', 'Titanics', 'titanic'], ['💎', 'Diamonds', 'diamonds'], ['🥚', 'Eggs', 'egg'], ['🌈', 'Rainbow', 'rainbow'], ['✨', 'Shiny', 'shiny']];
+function petHome(p) {
+  return `
+    <section class="pv-hero reveal">
+      <div class="pv-hero-copy">
+        <span class="pv-tag">🐾 The ${esc(CFG.games[0] || 'pet')} marketplace</span>
+        <h1>Hatch your <span class="pv-hl">dream pets</span> today</h1>
+        <p class="lead">Huges, Titanics, diamonds and eggs from real traders. Your money stays safe in the vault until the pet lands in your inventory.</p>
+        <form class="search pv-search" id="search">${icon.search}
+          <input name="q" placeholder="Search Huge Cat, Titanic, 10B diamonds…" value="${esc(p.get('q') || '')}" autocomplete="off">
+          <button class="btn">Find pets</button></form>
+        <div class="pv-stats">
+          <div><b data-stat="live">0</b><span>pets &amp; items</span></div>
+          <div><b data-stat="sellers">0</b><span>traders</span></div>
+          <div><b data-stat="completed">0</b><span>trades done</span></div>
+        </div>
+      </div>
+      <div class="pv-stage" aria-hidden="true"><div class="pv-blob"></div><div class="hero-art" id="hero-art"></div>
+        <span class="pv-float f1">🥚</span><span class="pv-float f2">💎</span><span class="pv-float f3">⭐</span></div>
+    </section>
+    <nav class="pv-cats" aria-label="Shop by type">${PET_CATEGORIES.map(([e, label, q], i) =>
+      `<a class="pv-cat reveal" style="--i:${i}" href="#/?q=${encodeURIComponent(q)}"><span>${e}</span>${esc(label)}</a>`).join('')}</nav>
+    <div id="feed"></div>
+    <div class="section-head"><div><span class="eyebrow">Fresh from the hatchery</span><h2 id="results-title">Newest pets</h2></div>
+      <div class="chips" id="chips"></div></div>
+    <div class="grid" id="results">${skeletons(8)}</div>
+    <section class="pv-steps">
+      <h2>How the vault keeps you safe</h2>
+      <ol>${[['🛒', 'Buy', 'Pay by card. Your money goes into the vault, not to the seller.'],
+             ['🤝', 'Trade', 'The seller trades the pet to your Roblox username and records the trade.'],
+             ['✅', 'Confirm', `Tick “received” and the seller gets paid. Something wrong? Open a case within ${CFG.hold_days} days.`]]
+        .map(([e, t, d], i) => `<li class="reveal" style="--i:${i}"><span class="pv-step-ic">${e}</span><b>${t}</b><p>${d}</p></li>`).join('')}</ol>
+      <p class="fine">Listing is free. Sellers pay a flat ${feePct()} only when a sale succeeds. Buyers never pay extra.</p>
+    </section>`;
+}
+
 function home() {
   const p = hashParams();
-  app.innerHTML = `
+  const solo = CFG.games.length === 1 ? CFG.games[0] : null; // a store that sells one game's items
+  const pet = CFG.theme === 'petvault';
+  app.innerHTML = pet ? petHome(p) : `
     <section class="hero hero-banner reveal">
       <div class="hero-copy">
         <span class="pill"><span class="dot"></span>Every purchase protected until you confirm it works</span>
-        <h1>Buy &amp; sell <span class="grad-text">game items</span> safely</h1>
-        <p class="lead">Skins, items, codes and mods from real players. Your money is held until you confirm it works.</p>
+        <h1>Buy &amp; sell <span class="grad-text">${solo ? esc(solo) : 'game items'}</span> safely</h1>
+        <p class="lead">${solo ? 'Items, currency and more' : 'Skins, items, codes and mods'} from real players. Your money is held until you confirm it works.</p>
         <form class="search" id="search">${icon.search}
           <input name="q" placeholder="Search skins, items, games…" value="${esc(p.get('q') || '')}" autocomplete="off">
           <button class="btn">Search</button></form>
@@ -339,8 +382,8 @@ function home() {
       <div class="hero-art" id="hero-art" aria-hidden="true"></div>
     </section>
     <div id="feed"></div>
-    <div class="section-head"><div><span class="eyebrow">Browse by game</span><h2>Popular games</h2></div></div>
-    <div class="game-tiles" id="game-tiles"></div>
+    ${solo ? '' : `<div class="section-head"><div><span class="eyebrow">Browse by game</span><h2>Popular games</h2></div></div>
+    <div class="game-tiles" id="game-tiles"></div>`}
     <div class="section-head"><div><span class="eyebrow">Marketplace</span><h2 id="results-title">Latest drops</h2></div>
       <div class="chips" id="chips"></div></div>
     <div class="grid" id="results">${skeletons(8)}</div>
@@ -389,7 +432,8 @@ async function loadResults(first) {
   const heroArt = $('#hero-art');
   if (heroArt && first) heroArt.innerHTML = data.listings.slice(0, 3).map((l, i) => `<a class="hero-card hc-${i}" href="#/item/${l.id}">${cover(l)}
     <span class="hc-info"><b>${esc(l.title)}</b><span>${money(l.price_cents)}</span></span></a>`).join('');
-  $('#results-title').textContent = q || game ? `${data.listings.length} result${data.listings.length === 1 ? '' : 's'}` : 'Latest drops';
+  $('#results-title').textContent = q || game ? `${data.listings.length} result${data.listings.length === 1 ? '' : 's'}` : CFG.theme === 'petvault' ? 'Newest pets' : 'Latest drops';
+  if (CFG.games.length === 1) $('#chips').innerHTML = q ? `<a class="chip" href="#/">Clear search ✕</a>` : ''; // one game: filtering by game means nothing
 
   results.innerHTML = data.listings.map(card).join('') || `
     <div class="empty" style="grid-column:1/-1"><div class="icon">${icon.bag}</div>
@@ -423,7 +467,7 @@ async function itemPage(id) {
     cta = `${l.status === 'removed' ? `<div class="notice bad">Removed${l.removal_reason ? ': ' + esc(l.removal_reason) : ''}</div>` : ''}
       <div class="payout glass" style="margin:0 0 14px;box-shadow:none">
         <div class="line"><span>Price</span><span>${money(l.price_cents)}</span></div>
-        <div class="line"><span>Lootrova fee (${feePct()})</span><span>−${money(fee)}</span></div>
+        <div class="line"><span>${esc(CFG.name)} fee (${feePct()})</span><span>−${money(fee)}</span></div>
         <div class="line total"><span>You receive</span><b>${money(l.price_cents - fee)}</b></div></div>
       ${l.status === 'active' ? `<button class="btn block" id="boost" style="margin-bottom:10px">⚡ ${l.boosted_until ? `Boosted until ${fmtDateTime(l.boosted_until)} · extend` : 'Boost this listing'}</button>` : ''}
       ${l.status !== 'removed' ? `<div class="cta-row"><a class="btn ghost" href="#/edit/${l.id}">Edit listing</a><button class="btn danger" id="remove">Remove listing</button></div>` : ''}`;
@@ -447,17 +491,17 @@ async function itemPage(id) {
       <div class="info glass reveal" style="--i:1">
         <span class="eyebrow">${esc(l.game)}</span>
         <h1>${esc(l.title)}</h1>
-        <div class="sold-by">${avatar(l.seller)}<span>Sold by <a href="#/u/${encodeURIComponent(l.seller)}" style="color:#fff;font-weight:700">${esc(l.seller)}</a></span>${rating(l.seller_rating, l.seller_reviews)}</div>
+        <div class="sold-by">${avatar(l.seller)}<span>Sold by <a href="#/u/${encodeURIComponent(l.seller)}" style="color:var(--text);font-weight:700">${esc(l.seller)}</a></span>${rating(l.seller_rating, l.seller_reviews)}</div>
         <div class="price">${money(l.price_cents)}</div>
         <p class="price-note">Final price. No extra fees at checkout.</p>
         ${cta}
-        <div class="protect">${icon.shield}<div><b>Lootrova Buyer Protection</b><p>Your payment is held for ${CFG.hold_days} days so you can check the item works. Not as described? <a href="#/policy/refunds" style="color:inherit">Request a refund</a>.</p></div></div>
+        <div class="protect">${icon.shield}<div><b>${esc(CFG.name)} Buyer Protection</b><p>Your payment is held for ${CFG.hold_days} days so you can check the item works. Not as described? <a href="#/policy/refunds" style="color:inherit">Request a refund</a>.</p></div></div>
         <div class="receive"><h3>What you receive</h3><p>${esc(l.delivers || 'See description')}</p>${specsList(l)}</div>
         <div class="desc-wrap"><div class="block-title">Description</div><p class="desc">${esc(l.description)}</p></div>
         <div class="seller-card">${avatar(l.seller, 'lg')}
-          <div style="flex:1"><a href="#/u/${encodeURIComponent(l.seller)}" style="color:#fff;font-weight:700;text-decoration:none">${esc(l.seller)}</a><small class="muted">${l.seller_sales} sale${l.seller_sales === 1 ? '' : 's'} on Lootrova</small></div>
+          <div style="flex:1"><a href="#/u/${encodeURIComponent(l.seller)}" style="color:var(--text);font-weight:700;text-decoration:none">${esc(l.seller)}</a><small class="muted">${l.seller_sales} sale${l.seller_sales === 1 ? '' : 's'} on ${esc(CFG.name)}</small></div>
           ${rating(l.seller_rating, l.seller_reviews) || '<small class="muted">New seller</small>'}</div>
-        <div class="market-note"><span>Listed by an independent seller. Lootrova takes a ${feePct()} fee from each sale.</span>
+        <div class="market-note"><span>Listed by an independent seller. ${esc(CFG.name)} takes a ${feePct()} fee from each sale.</span>
           ${l.is_owner ? '' : `<button class="link-btn" id="report">${icon.flag} Report product</button>`}</div>
       </div>
     </div>`;
@@ -511,7 +555,7 @@ async function checkoutPage(id) {
     <div class="line"><span>Product price</span><span>${money(qq.price_cents)}</span></div>
     <div class="line"><span>Service fee</span><span>${money(qq.buyer_fee_cents)}</span></div>
     <div class="line total"><span>Total to pay</span><span id="sum-total">${money(qq.total_cents)}</span></div>
-    <p class="fine">No other fees will be added. Lootrova’s ${feePct()} platform fee (${money(sellerFee)}) is paid by the seller from their earnings.</p>
+    <p class="fine">No other fees will be added. ${esc(CFG.name)}’s ${feePct()} platform fee (${money(sellerFee)}) is paid by the seller from their earnings.</p>
     <div class="receive" style="margin-top:16px"><h3>What you receive</h3><p>${esc(qq.delivers)}</p></div>`;
 
   app.innerHTML = `
@@ -520,7 +564,7 @@ async function checkoutPage(id) {
     <div class="sell-layout">
       <form class="sell-form glass reveal" id="f" novalidate>
         <div class="field"><label for="email">Email for your receipt</label>
-          <input id="email" name="email" type="email" autocomplete="email" required value="${esc(store.get('lootrova_email') || '')}">
+          <input id="email" name="email" type="email" autocomplete="email" required value="${esc(store.get('store_email') || '')}">
           <span class="hint">Your receipt is also saved to your account.</span></div>
         ${q.buyer_info_label ? `<div class="field"><label for="binfo">${esc(q.buyer_info_label)}</label>
           <input id="binfo" name="binfo" required maxlength="200" placeholder="The seller needs this to deliver your item">
@@ -538,7 +582,7 @@ async function checkoutPage(id) {
           <span>I want immediate access to this digital content. I understand that once the download is available, I lose my 14-day right to cancel. My rights for faulty or misdescribed items are not affected (<a href="#/policy/refunds" style="color:var(--violet-soft)">Refund Policy</a>).</span></label>
         <p class="error" id="err" role="alert"></p>
         <button class="btn lg block" id="pay">${icon.lock} Pay ${money(q.total_cents)} now</button>
-        <div class="pay-secure">${icon.lock} Card details go straight to the payment provider. Lootrova never stores your card number.</div>
+        <div class="pay-secure">${icon.lock} Card details go straight to the payment provider. ${esc(CFG.name)} never stores your card number.</div>
         <a class="btn ghost block" href="#/item/${q.listing_id}" style="margin-top:12px">Cancel</a>
       </form>
       <aside class="preview-col reveal" style="--i:2">
@@ -580,7 +624,7 @@ async function checkoutPage(id) {
           if (e2.status === 409 && e2.data?.quote) { q = e2.data.quote; $('#summary').innerHTML = summary(q); payBtn.dataset.total = q.total_cents; }
           throw e2;
         }
-        store.set('lootrova_email', f.email.value);
+        store.set('store_email', f.email.value);
         const [mm, yy] = f.exp.value.split('/').map((s) => s.trim());
         try {
           await request(`/provider/${co.payment.provider}/payment_intents/${co.payment.intent_id}/confirm`, {
@@ -634,7 +678,7 @@ async function receiptPage(id) {
   const { order: o } = await api('/orders/' + id);
   app.innerHTML = `
     <div class="receipt glass reveal">
-      <div class="receipt-head"><div class="logo"><img src="/logo.svg" alt="" width="26" height="26"><span>Loot<b>rova</b></span></div>
+      <div class="receipt-head"><div class="logo"><img src="${esc(CFG.logo)}" alt="" width="26" height="26"><span>${esc(CFG.name_parts[0])}<b>${esc(CFG.name_parts[1])}</b></span></div>
         <div style="text-align:right"><b>Receipt</b><div class="meta">${esc(o.receipt_no || 'Order #' + o.id)}</div></div></div>
       <div class="meta" style="margin-bottom:18px">Date: ${fmtDateTime(o.paid_at || o.created_at)}<br>Buyer: ${esc(o.buyer)}${o.email ? ` (${esc(o.email)})` : ''}<br>
         Status: ${esc(statusLabel(o.status, 'buyer'))}${o.card ? `<br>Paid with: ${esc(o.card.brand)} ending ${esc(o.card.last4)}` : ''}</div>
@@ -644,7 +688,7 @@ async function receiptPage(id) {
       <div class="line"><span>Service fee</span><span>${money(o.buyer_fee_cents)}</span></div>
       <div class="line total"><span>Total paid</span><span>${money(o.total_cents)}</span></div>
       ${o.refunded_at ? `<div class="line"><span>Refunded ${fmtDate(o.refunded_at)}</span><span>−${money(o.total_cents)}</span></div>` : ''}
-      <p class="fine">Sold by ${esc(o.seller)}, an independent seller on the Lootrova marketplace. ${o.licence_label ? 'Licence: ' + esc(o.licence_label) : ''}</p>
+      <p class="fine">Sold by ${esc(o.seller)}, an independent seller on the ${esc(CFG.name)} marketplace. ${o.licence_label ? 'Licence: ' + esc(o.licence_label) : ''}</p>
       <div class="cta-row no-print" style="margin-top:20px"><button class="btn ghost" onclick="window.print()">Print or save as PDF</button>
         ${o.can_download ? `<a class="btn" href="${o.download_url}">${icon.download} Download</a>` : ''}</div>
     </div>`;
@@ -661,7 +705,7 @@ function statusLabel(s, who) {
 // ---------- Profiles ----------
 async function profilePage(name) {
   const { profile: p, listings } = await api('/profile?u=' + encodeURIComponent(name));
-  document.title = `${p.username} — Lootrova`;
+  document.title = `${p.username} — ${CFG.name}`;
   app.innerHTML = `<div class="profile glass reveal">${avatar(p.username, 'xl')}
       <div class="p-main"><h1>${esc(p.username)} <span class="pres ${p.presence.online ? 'on' : ''}"><i></i>${p.presence.online ? 'Online now' : 'Offline'}</span></h1>
         <small class="muted">Member since ${fmtDate(p.joined)}${!p.presence.online && p.presence.last_seen_at ? ` · last seen ${fmtDateTime(p.presence.last_seen_at)}` : ''}</small>
@@ -806,7 +850,7 @@ function authPage(kind) {
   const signup = kind === 'signup';
   const next = hashParams().get('next');
   app.innerHTML = `<div class="auth-wrap"><form class="auth glass" id="f">
-    <img class="logo-mark" src="/logo.svg" alt="">
+    <img class="logo-mark" src="${esc(CFG.logo)}" alt="">
     <h1>${signup ? 'Create your account' : 'Welcome back'}</h1>
     <p class="sub">${next ? 'Log in to continue.' : signup ? 'Start buying and selling game items in seconds.' : 'Log in to continue trading.'}</p>
     <div class="field"><label for="u">Username</label><input id="u" name="username" autocomplete="username" required></div>
@@ -815,7 +859,7 @@ function authPage(kind) {
     <p class="error" id="err"></p>
     <button class="btn lg block">${signup ? 'Create account' : 'Log in'}</button>
     <p class="switch">${signup ? `Already have an account? <a href="#/login${next ? '?next=' + encodeURIComponent(next) : ''}">Log in</a>`
-      : `New to Lootrova? <a href="#/signup${next ? '?next=' + encodeURIComponent(next) : ''}">Create an account</a>`}</p>
+      : `New to ${esc(CFG.name)}? <a href="#/signup${next ? '?next=' + encodeURIComponent(next) : ''}">Create an account</a>`}</p>
     ${signup ? '<p class="fine" style="text-align:center">By creating an account you agree to the <a href="#/policy/terms" style="color:var(--violet-soft)">Terms of Service</a> and <a href="#/policy/privacy" style="color:var(--violet-soft)">Privacy Policy</a>.</p>' : ''}
   </form></div>`;
   const f = $('#f');
@@ -825,7 +869,7 @@ function authPage(kind) {
     try {
       await busy($('button', f), () => api('/' + kind, { username: f.username.value, password: f.password.value }));
       await loadMe();
-      toast(signup ? `Welcome to Lootrova, ${me.username}!` : `Welcome back, ${me.username}`);
+      toast(signup ? `Welcome to ${CFG.name}, ${me.username}!` : `Welcome back, ${me.username}`);
       if (next && /^\/download\/\d+$/.test(next)) location.href = next;
       else location.hash = next && next.startsWith('#/') ? next : '#/';
     } catch (err) {
@@ -943,7 +987,7 @@ async function sellPage(editId) {
     }, 0).replace('reveal', '');
     $('#payout').innerHTML = `
       <div class="line"><span>Listing price (buyer pays)</span><span>${money(cents)}</span></div>
-      <div class="line"><span>Lootrova platform fee (${feePct()})</span><span>−${money(fee)}</span></div>
+      <div class="line"><span>${esc(CFG.name)} platform fee (${feePct()})</span><span>−${money(fee)}</span></div>
       <div class="line total"><span>You receive per sale</span><b>${money(cents - fee)}</b></div>
       <p class="fine">Earnings become available ${CFG.hold_days} days after each sale, or sooner when the buyer confirms the item works.</p>`;
     const lic = CFG.licences[f.licence.value];
@@ -1091,7 +1135,7 @@ async function dashboard() {
       ${o.status === 'disputed' ? `<button class="btn danger sm" data-refund="${o.id}">Refund buyer</button>` : ''}</div></div>`;
   const listingRow = (l, i) => `<div class="row reveal" style="--i:${i}">${th(l)}
     <div class="main"><a href="#/item/${l.id}" style="text-decoration:none"><b>${esc(l.title)}</b></a><small>${esc(l.game)} · ${money(l.price_cents)} · ${l.sold_count} sold${l.stock != null ? ` of ${l.stock}` : ''}</small>
-      ${l.status === 'removed' ? `<span class="when">Removed by Lootrova: ${esc(l.removal_reason || 'breaks marketplace rules')}</span>` : ''}
+      ${l.status === 'removed' ? `<span class="when">Removed by ${esc(CFG.name)}: ${esc(l.removal_reason || 'breaks marketplace rules')}</span>` : ''}
       ${!l.has_file && l.status !== 'removed' ? '<span class="when">Add a product file so buyers can purchase this item.</span>' : ''}</div>
     <div class="side"><span class="status ${l.status}">${statusLabel(l.status)}</span>
       ${l.status === 'active' ? `<button class="btn ${l.boosted_until ? 'ghost' : ''} sm" data-boost="${l.id}">⚡ ${l.boosted_until ? 'Boosted' : 'Boost'}</button>` : ''}${l.status !== 'removed' ? `<a class="btn ghost sm" href="#/edit/${l.id}">Edit</a><button class="btn danger sm" data-remove="${l.id}">Remove</button>` : ''}</div></div>`;
@@ -1132,7 +1176,7 @@ async function dashboard() {
       return true;
     });
     act('[data-refund-req]', async (b) => {
-      const r = await askText('Request a refund', 'Tell the seller what’s wrong. Their earnings are held while your request is reviewed, and Lootrova support steps in if needed.',
+      const r = await askText('Request a refund', `Tell the seller what’s wrong. Their earnings are held while your request is reviewed, and ${esc(CFG.name)} support steps in if needed.`,
         { label: 'What went wrong?', action: 'Request refund', min: 10 });
       if (!r) return false;
       await api(`/orders/${b.dataset.refundReq}/refund-request`, { reason: r.text });
@@ -1301,19 +1345,19 @@ async function adminPage() {
 function policyPage(slug) {
   const p = window.POLICIES?.[slug];
   if (!p) throw new Error('Page not found');
-  document.title = `${p.title} — Lootrova`;
-  app.innerHTML = `<article class="policy glass reveal"><span class="eyebrow">Lootrova policies</span><h1>${p.title}</h1>${p.body}
+  document.title = `${p.title} — ${CFG.name}`;
+  app.innerHTML = `<article class="policy glass reveal"><span class="eyebrow">${esc(CFG.name)} policies</span><h1>${p.title}</h1>${p.body.replaceAll('Lootrova', esc(CFG.name))}
     <p class="fine" style="margin-top:28px">Questions about this policy? <a href="#/contact">Contact support</a>.</p></article>`;
 }
 
 function contactPage() {
-  document.title = 'Contact & Support — Lootrova';
+  document.title = `Contact & Support — ${CFG.name}`;
   app.innerHTML = `<div class="policy glass reveal"><span class="eyebrow">Help</span><h1>Contact &amp; Support</h1>
     <p>Problem with an order? The quickest fix is usually in your <a href="#/dashboard?tab=library">Library</a>, where you can download again, see receipts or request a refund. For anything else, send us a message and we’ll reply by email, usually within 2 business days.</p>
     ${CFG.support_email ? `<p>Email: <a href="mailto:${esc(CFG.support_email)}">${esc(CFG.support_email)}</a></p>` : ''}
     <form id="f" style="margin-top:22px">
       <div class="card-fields"><div class="field"><label for="n">Your name</label><input id="n" name="name" autocomplete="name" value="${esc(me?.username || '')}"></div>
-      <div class="field"><label for="e">Email</label><input id="e" name="email" type="email" autocomplete="email" value="${esc(store.get('lootrova_email') || '')}"></div></div>
+      <div class="field"><label for="e">Email</label><input id="e" name="email" type="email" autocomplete="email" value="${esc(store.get('store_email') || '')}"></div></div>
       <div class="field" style="margin-top:14px"><label for="s">Subject</label><input id="s" name="subject" placeholder="e.g. Order LR-2026-000012"></div>
       <div class="field"><label for="m">Message</label><textarea id="m" name="message"></textarea></div>
       <p class="error" id="err"></p><button class="btn">Send message</button></form>
@@ -1355,7 +1399,7 @@ async function route() {
   // Changing the search or game filter on the home page only refreshes the results.
   if (view === 'home' && currentView === 'home' && $('#results')) return loadResults().catch((e) => toast(e.message, 'err'));
   currentView = view;
-  document.title = 'Lootrova — The Premium Game Item Marketplace';
+  document.title = `${CFG.name} — ${CFG.games.length === 1 ? 'The ' + CFG.games[0] + ' Item Marketplace' : 'The Premium Game Item Marketplace'}`;
   app.classList.remove('page');
   void app.offsetWidth; // restart the page-enter animation
   app.classList.add('page');
@@ -1383,4 +1427,7 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
-Promise.all([api('/config').then((c) => { CFG = c; }), loadMe()]).then(() => { route(); loadGameBar().catch(() => {}); });
+Promise.all([api('/config').then((c) => {
+  CFG = c;
+  if (CFG.theme === 'petvault') $('#top-search input').placeholder = 'Search pets, eggs, diamonds…';
+}), loadMe()]).then(() => { route(); loadGameBar().catch(() => {}); });

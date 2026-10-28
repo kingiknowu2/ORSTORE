@@ -1,0 +1,279 @@
+/* PetVault: a bright, toy-like look for the Pet Simulator 99 store. Loaded on top of /style.css when STORE_THEME=petvault.
+   Chunky ink outlines, hard drop shadows, candy colours and bouncy motion. */
+:root[data-theme="petvault"] {
+  --ink: #231942;
+  --bg: #e8f6ff;
+  --surface: #ffffff;
+  --surface-2: #f3eeff;
+  --line: #e4dcf7;
+  --line-strong: #231942;
+  --text: #231942;
+  --muted: #625a82;
+  --dim: #9d95ba;
+  --violet: #7b5cff;
+  --violet-soft: #6a48ff;
+  --cyan: #12b5f0;
+  --gold: #ffb020;
+  --ok: #14a35c;
+  --warn: #c98200;
+  --bad: #e5345e;
+  --grad: linear-gradient(180deg, #ffe066 0%, #ffc531 100%);
+  --radius: 22px;
+  --pop: 0 5px 0 var(--ink);
+  --pop-sm: 0 3px 0 var(--ink);
+  --border: 2.5px solid var(--ink);
+  --bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --shadow: var(--pop);
+  color-scheme: light;
+}
+[data-theme="petvault"] body {
+  font-size: 16px;
+  background-color: #e8f6ff !important;
+  background-image:
+    radial-gradient(circle at 12% 8%, rgba(255, 224, 102, 0.55) 0 120px, transparent 121px),
+    radial-gradient(circle at 92% 30%, rgba(255, 143, 199, 0.35) 0 160px, transparent 161px),
+    radial-gradient(rgba(35, 25, 66, 0.09) 1.5px, transparent 1.6px),
+    linear-gradient(180deg, #dff2ff 0%, #f6efff 60%, #fff4e6 100%) !important;
+  background-size: auto, auto, 22px 22px, auto !important;
+  background-attachment: fixed !important;
+}
+[data-theme="petvault"] ::selection { background: #ffe066; color: var(--ink); }
+[data-theme="petvault"] .bg { display: none; }
+[data-theme="petvault"] h1, [data-theme="petvault"] h2, [data-theme="petvault"] h3 { font-weight: 800; letter-spacing: -0.015em; }
+[data-theme="petvault"] .muted, [data-theme="petvault"] .fine { color: var(--muted); }
+[data-theme="petvault"] .eyebrow { color: var(--violet-soft); letter-spacing: 0.08em; font-weight: 800; }
+[data-theme="petvault"] a:focus-visible, [data-theme="petvault"] button:focus-visible { outline: 3px solid var(--violet); outline-offset: 2px; }
+
+/* ---------- Header ---------- */
+[data-theme="petvault"] .topbar { background: #fff; border-bottom: var(--border); box-shadow: 0 4px 0 rgba(35, 25, 66, 0.08); backdrop-filter: none; }
+[data-theme="petvault"] .topstrip { background: var(--violet); color: #fff; border-bottom: var(--border); font-weight: 600; }
+[data-theme="petvault"] .strip-links a { color: #fff; opacity: 0.9; }
+[data-theme="petvault"] .strip-links a:hover { color: #fff; opacity: 1; text-decoration: underline; }
+[data-theme="petvault"] .logo { font-size: 1.6rem; font-weight: 800; color: var(--ink); }
+[data-theme="petvault"] .logo b { color: var(--violet) !important; }
+[data-theme="petvault"] .logo img { width: 38px; height: 38px; }
+[data-theme="petvault"] .logo:hover img { transform: rotate(-14deg) scale(1.12); transition-timing-function: var(--bounce); }
+[data-theme="petvault"] .topsearch { background: var(--surface-2); border: var(--border); border-radius: 999px; height: 46px; color: var(--ink); }
+[data-theme="petvault"] .topsearch:focus-within { border-color: var(--violet); box-shadow: 0 0 0 4px rgba(123, 92, 255, 0.2); }
+[data-theme="petvault"] .gamebar { background: #fff; border-top: 0; border-bottom: var(--border); }
+[data-theme="petvault"] .gamebar .topbar-inner { gap: 8px; padding: 8px 16px; }
+[data-theme="petvault"] .gamebar a { color: var(--ink); font-weight: 700; border: 0; border-radius: 999px; padding: 7px 14px; }
+[data-theme="petvault"] .gamebar a:hover { background: var(--surface-2); color: var(--ink); }
+[data-theme="petvault"] .gamebar a.on { background: var(--ink); color: #fff; }
+[data-theme="petvault"] .gamebar .gb-sell { background: #ffe066; border: var(--border); box-shadow: var(--pop-sm); color: var(--ink); }
+[data-theme="petvault"] .gb-platform { color: var(--violet); }
+[data-theme="petvault"] .nav-link { color: var(--ink); font-weight: 700; border-radius: 999px; }
+[data-theme="petvault"] .nav-link:hover, [data-theme="petvault"] .nav-link.active { background: var(--surface-2); color: var(--ink); }
+[data-theme="petvault"] .user-chip { background: #fff; border: var(--border); box-shadow: var(--pop-sm); }
+
+/* ---------- Buttons ---------- */
+[data-theme="petvault"] .btn {
+  color: var(--ink); background: var(--grad); border: var(--border); border-radius: 999px; font-weight: 800;
+  box-shadow: var(--pop-sm); transition: transform 0.25s var(--bounce), box-shadow 0.2s, filter 0.2s;
+}
+[data-theme="petvault"] .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 0 var(--ink); filter: saturate(1.15); }
+[data-theme="petvault"] .btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+[data-theme="petvault"] .btn:disabled { transform: none; box-shadow: var(--pop-sm); }
+[data-theme="petvault"] .btn.ghost { background: #fff; color: var(--ink); border: var(--border); }
+[data-theme="petvault"] .btn.ghost:hover { background: var(--surface-2); border-color: var(--ink); }
+[data-theme="petvault"] .btn.danger { background: #ffe1e9; color: #b3123f; border: var(--border); }
+[data-theme="petvault"] .btn.success { background: linear-gradient(180deg, #6ef0a6, #2fd27d); color: var(--ink); box-shadow: var(--pop-sm); }
+[data-theme="petvault"] .btn .spinner { border-color: rgba(35, 25, 66, 0.25); border-top-color: var(--ink); }
+[data-theme="petvault"] .link-btn { color: var(--violet-soft); }
+
+/* ---------- Surfaces ---------- */
+[data-theme="petvault"] .glass, [data-theme="petvault"] .card, [data-theme="petvault"] .row, [data-theme="petvault"] .skeleton {
+  background: #fff; border: var(--border); box-shadow: var(--pop); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+[data-theme="petvault"] .card { border-radius: var(--radius); transition: transform 0.35s var(--bounce), box-shadow 0.25s; }
+[data-theme="petvault"] .card:hover { transform: translateY(-6px) rotate(-0.6deg); box-shadow: 0 10px 0 var(--ink); border-color: var(--ink); }
+[data-theme="petvault"] .card .media { background: var(--surface-2); border-bottom: var(--border); }
+[data-theme="petvault"] .card .media::after { display: none; }
+[data-theme="petvault"] .card h3 { color: var(--ink); }
+[data-theme="petvault"] .badge, [data-theme="petvault"] .img-count { background: #fff; color: var(--ink); border: 2px solid var(--ink); backdrop-filter: none; font-weight: 800; }
+[data-theme="petvault"] .boost-badge { background: #ffe066; color: var(--ink); border: 2px solid var(--ink); }
+[data-theme="petvault"] .price { color: var(--ink); font-weight: 800; }
+[data-theme="petvault"] .card .price { background: #d9fbe8; border: 2px solid var(--ink); border-radius: 999px; padding: 2px 10px; }
+[data-theme="petvault"] .rating { color: #d48a00; }
+[data-theme="petvault"] .avatar { border: 2px solid var(--ink); color: #fff; }
+[data-theme="petvault"] .art span { color: rgba(35, 25, 66, 0.75); text-shadow: none; }
+[data-theme="petvault"] .skeleton .sk { background: linear-gradient(90deg, #f1ecff 0%, #e4dcfb 50%, #f1ecff 100%); background-size: 200% 100%; }
+[data-theme="petvault"] .chip { background: #fff; color: var(--ink); border: var(--border); font-weight: 700; }
+[data-theme="petvault"] .chip:hover { background: var(--surface-2); color: var(--ink); }
+[data-theme="petvault"] .chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+[data-theme="petvault"] .empty .icon { background: #ffe066; border: var(--border); color: var(--ink); }
+
+/* ---------- PetVault home ---------- */
+.pv-hero {
+  position: relative; display: grid; grid-template-columns: 1.05fr 1fr; gap: 24px; align-items: center; margin-top: 30px;
+  padding: 44px 44px 40px; border: var(--border); border-radius: 32px; box-shadow: 0 8px 0 var(--ink); overflow: hidden;
+  background: radial-gradient(circle at 85% 20%, #fff6 0 90px, transparent 91px), linear-gradient(135deg, #8f74ff 0%, #6a48ff 45%, #3fb6ff 100%);
+  color: #fff;
+}
+.pv-hero::after {
+  content: ''; position: absolute; inset: auto -10% -60px -10%; height: 120px; background: #fff; border-top: var(--border);
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0; opacity: 0.16;
+}
+.pv-tag { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: #fff; color: var(--ink); border: var(--border); font-weight: 800; font-size: 0.85rem; box-shadow: var(--pop-sm); }
+.pv-hero h1 { font-size: clamp(2.3rem, 5.4vw, 4rem); line-height: 1.02; margin: 20px 0 14px; color: #fff; text-shadow: 0 4px 0 var(--ink); -webkit-text-stroke: 1px var(--ink); }
+.pv-hl { color: #ffe066; display: inline-block; transform: rotate(-2deg); }
+.pv-hero .lead { font-size: 1.1rem; max-width: 520px; margin: 0 0 24px; color: #f1edff; }
+.pv-search { margin: 0; max-width: 540px; background: #fff; border: var(--border); border-radius: 999px; box-shadow: var(--pop); padding-left: 48px; }
+.pv-search:focus-within { border-color: var(--ink); box-shadow: 0 5px 0 var(--ink), 0 0 0 5px rgba(255, 224, 102, 0.6); }
+.pv-search input { color: var(--ink); background: none; border: 0; }
+.pv-search svg { color: var(--violet); }
+.pv-stats { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; position: relative; z-index: 1; }
+.pv-stats div { display: flex; align-items: baseline; gap: 6px; padding: 8px 16px; border-radius: 999px; background: rgba(35, 25, 66, 0.35); border: 2px solid rgba(255, 255, 255, 0.35); }
+.pv-stats b { font-size: 1.25rem; font-weight: 800; color: #ffe066; font-variant-numeric: tabular-nums; }
+.pv-stats span { font-size: 0.85rem; color: #fff; font-weight: 600; }
+.pv-stage { position: relative; height: 360px; }
+.pv-blob { position: absolute; inset: 8% 6%; border-radius: 46% 54% 58% 42% / 52% 44% 56% 48%; background: #ffe066; border: var(--border); box-shadow: 0 8px 0 var(--ink); animation: pvMorph 9s ease-in-out infinite alternate; }
+@keyframes pvMorph { to { border-radius: 58% 42% 44% 56% / 42% 58% 42% 58%; transform: rotate(8deg) scale(1.03); } }
+.pv-stage .hero-art { position: absolute; inset: 0; height: auto; }
+[data-theme="petvault"] .pv-stage .hero-card {
+  width: 46%; border-radius: 22px; border: var(--border); box-shadow: var(--pop); background: #fff; color: var(--ink);
+  animation: pvBob 4s ease-in-out infinite; transition: transform 0.4s var(--bounce);
+}
+[data-theme="petvault"] .pv-stage .hc-0 { left: 2%; top: 18%; --r: -8deg; animation-delay: -1s; }
+[data-theme="petvault"] .pv-stage .hc-1 { left: 28%; top: 2%; --r: 3deg; z-index: 3; }
+[data-theme="petvault"] .pv-stage .hc-2 { left: auto; right: 2%; top: 38%; --r: 9deg; animation-delay: -2.2s; }
+[data-theme="petvault"] .pv-stage .hero-card:hover { animation-play-state: paused; z-index: 4; }
+@keyframes pvBob { 0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); } 50% { transform: translateY(-10px) rotate(var(--r, 0deg)); } }
+[data-theme="petvault"] .hero-card .hc-info { background: #fff; color: var(--ink); border-top: var(--border); }
+[data-theme="petvault"] .hero-card .hc-info b { color: var(--ink); }
+.pv-float { position: absolute; font-size: 2.4rem; filter: drop-shadow(0 3px 0 var(--ink)); animation: pvBob 3.2s ease-in-out infinite; z-index: 5; }
+.pv-float.f1 { left: 0; bottom: 4%; animation-delay: -0.6s; }
+.pv-float.f2 { right: 6%; top: 0; animation-delay: -1.4s; }
+.pv-float.f3 { right: 40%; bottom: -2%; font-size: 1.8rem; }
+.pv-cats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin: 30px 0 4px; }
+.pv-cat {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 8px 14px; border-radius: 20px; background: #fff;
+  border: var(--border); box-shadow: var(--pop); text-decoration: none; color: var(--ink); font-weight: 800;
+  transition: transform 0.35s var(--bounce), box-shadow 0.2s, background 0.2s;
+}
+.pv-cat span { font-size: 1.9rem; line-height: 1; transition: transform 0.4s var(--bounce); }
+.pv-cat:hover { transform: translateY(-4px); box-shadow: 0 8px 0 var(--ink); background: #fff8d6; }
+.pv-cat:hover span { transform: scale(1.25) rotate(-10deg); }
+.pv-cat:nth-child(6n+1):hover { background: #ffe9f4; } .pv-cat:nth-child(6n+2):hover { background: #fff3cc; }
+.pv-cat:nth-child(6n+3):hover { background: #e2f6ff; } .pv-cat:nth-child(6n+4):hover { background: #e9fbe9; }
+.pv-cat:nth-child(6n+5):hover { background: #f0e9ff; }
+.pv-steps { margin: 56px 0 10px; padding: 34px; background: #fff; border: var(--border); border-radius: 30px; box-shadow: 0 8px 0 var(--ink); text-align: center; }
+.pv-steps h2 { font-size: 1.7rem; margin-bottom: 22px; }
+.pv-steps ol { list-style: none; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: s; }
+.pv-steps li { padding: 22px 18px; border-radius: 22px; background: var(--surface-2); border: 2px dashed rgba(35, 25, 66, 0.3); counter-increment: s; position: relative; }
+.pv-steps li::before { content: counter(s); position: absolute; top: -14px; left: 50%; transform: translateX(-50%); width: 28px; height: 28px; border-radius: 50%; background: var(--violet); color: #fff; font-weight: 800; display: grid; place-items: center; border: 2px solid var(--ink); }
+.pv-step-ic { font-size: 2rem; display: block; margin-bottom: 6px; }
+.pv-steps b { font-size: 1.15rem; }
+.pv-steps p { margin: 6px 0 0; color: var(--muted); }
+
+/* ---------- Item, checkout, forms ---------- */
+[data-theme="petvault"] .gallery .main { background: var(--surface-2); border: var(--border); box-shadow: var(--pop); }
+[data-theme="petvault"] .thumbs button { border: 2px solid var(--line); }
+[data-theme="petvault"] .thumbs button.on { border-color: var(--ink); }
+[data-theme="petvault"] .info .desc, [data-theme="petvault"] .specs dd, [data-theme="petvault"] .row .detail-text, [data-theme="petvault"] .policy p, [data-theme="petvault"] .policy li, [data-theme="petvault"] .plan ul { color: #3e3561; }
+[data-theme="petvault"] .protect { background: #e6fbef; border: 2px solid var(--ink); color: var(--ink); }
+[data-theme="petvault"] .protect svg { color: var(--ok); }
+[data-theme="petvault"] .seller-card a, [data-theme="petvault"] .seller-card b { color: var(--ink) !important; }
+[data-theme="petvault"] .receive { background: #f3eeff; border: 2px solid rgba(123, 92, 255, 0.35); }
+[data-theme="petvault"] .market-note, [data-theme="petvault"] .specs { border-color: var(--line); }
+[data-theme="petvault"] .field label { color: var(--ink); font-weight: 700; }
+[data-theme="petvault"] input, [data-theme="petvault"] textarea, [data-theme="petvault"] select {
+  background: #fff; color: var(--ink); border: 2px solid rgba(35, 25, 66, 0.35); border-radius: 14px;
+}
+[data-theme="petvault"] input:focus, [data-theme="petvault"] textarea:focus, [data-theme="petvault"] select:focus {
+  background: #fff; border-color: var(--violet); box-shadow: 0 0 0 4px rgba(123, 92, 255, 0.18);
+}
+[data-theme="petvault"] .pv-search input, [data-theme="petvault"] .topsearch input { border: 0; box-shadow: none !important; background: none; }
+[data-theme="petvault"] input::placeholder, [data-theme="petvault"] textarea::placeholder { color: var(--dim); }
+[data-theme="petvault"] select option { background: #fff; color: var(--ink); }
+[data-theme="petvault"] .input-prefix span { color: var(--muted); }
+[data-theme="petvault"] .check { background: #fff; border: 2px solid var(--line); }
+[data-theme="petvault"] .check:hover { border-color: var(--violet); }
+[data-theme="petvault"] .check.invalid { border-color: var(--bad); }
+[data-theme="petvault"] .dropzone { background: var(--surface-2); border: 2.5px dashed rgba(35, 25, 66, 0.4); }
+[data-theme="petvault"] .dropzone:hover, [data-theme="petvault"] .dropzone.over { border-color: var(--violet); background: #ece5ff; }
+[data-theme="petvault"] .thumb .x { background: #fff; color: var(--ink); border: 2px solid var(--ink); }
+[data-theme="petvault"] .notice { background: #fff6d8; border: 2px solid #e8b100; color: #6b4a00; }
+[data-theme="petvault"] .notice.bad { background: #ffe5ec; border-color: var(--bad); color: #8c0f30; }
+[data-theme="petvault"] .notice.ok { background: #e3f9ec; border-color: var(--ok); color: #0c5c34; }
+[data-theme="petvault"] .error { color: var(--bad); }
+[data-theme="petvault"] .test-cards { background: #fff6d8; border: 2px dashed #e8b100; }
+[data-theme="petvault"] .test-cards button { color: #6b4a00; }
+[data-theme="petvault"] .pay-secure { color: var(--muted); }
+[data-theme="petvault"] .summary-panel .line.total, [data-theme="petvault"] .receipt .line.total, [data-theme="petvault"] .payout .line.total { border-color: var(--ink); }
+[data-theme="petvault"] .success-page .tick { background: linear-gradient(180deg, #6ef0a6, #2fd27d); color: var(--ink); border: var(--border); box-shadow: var(--pop); }
+[data-theme="petvault"] .buybar { background: #fff; border-top: var(--border); }
+
+/* ---------- Auth, dashboard, admin ---------- */
+[data-theme="petvault"] .auth::before { display: none; }
+[data-theme="petvault"] .auth .logo-mark { filter: drop-shadow(0 4px 0 rgba(35, 25, 66, 0.25)); }
+[data-theme="petvault"] .auth .switch a { color: var(--violet-soft); }
+[data-theme="petvault"] .tile { background: #fff; border: var(--border); box-shadow: var(--pop-sm); }
+[data-theme="petvault"] .tile.hl { background: #fff4c2; }
+[data-theme="petvault"] .tile.hl::after { display: none; }
+[data-theme="petvault"] .tabs { border-color: var(--line); }
+[data-theme="petvault"] .tab { color: var(--ink); font-weight: 700; border-radius: 999px; }
+[data-theme="petvault"] .tab:hover { background: var(--surface-2); color: var(--ink); }
+[data-theme="petvault"] .tab.on { background: var(--ink); color: #fff; box-shadow: none; }
+[data-theme="petvault"] .row { box-shadow: var(--pop-sm); }
+[data-theme="petvault"] .row:hover { border-color: var(--ink); background: #fffdf5; }
+[data-theme="petvault"] .row .th { background: var(--surface-2); border: 2px solid var(--ink); }
+[data-theme="petvault"] .status { background: var(--surface-2); color: var(--ink); border: 1.5px solid rgba(35, 25, 66, 0.25); }
+[data-theme="petvault"] .progress { background: var(--surface-2); border: 2px solid var(--ink); }
+[data-theme="petvault"] .progress i { background: var(--violet); }
+[data-theme="petvault"] .ledger-table th { color: var(--muted); }
+[data-theme="petvault"] .ledger-table th, [data-theme="petvault"] .ledger-table td { border-color: var(--line); }
+[data-theme="petvault"] .file-chip { background: var(--surface-2); border: 2px solid var(--line); }
+[data-theme="petvault"] .stars button { color: #d9d2ee; }
+[data-theme="petvault"] .stars button.on, [data-theme="petvault"] .stars button:hover { color: var(--gold); }
+[data-theme="petvault"] .modal-back { background: rgba(35, 25, 66, 0.45); }
+[data-theme="petvault"] .modal { background: #fff; border: var(--border); box-shadow: 0 8px 0 var(--ink); }
+[data-theme="petvault"] .toast { background: #fff; color: var(--ink); border: var(--border); box-shadow: var(--pop-sm); }
+
+/* ---------- Chat, cases, profiles, plans ---------- */
+[data-theme="petvault"] .chat-list { background: var(--surface-2); border: 2px solid var(--line); }
+[data-theme="petvault"] .msg { background: #fff; border: 2px solid var(--ink); color: var(--ink); }
+[data-theme="petvault"] .msg.me { background: var(--violet); color: #fff; }
+[data-theme="petvault"] .msg.support { background: #fff6d8; border-color: #e8b100; }
+[data-theme="petvault"] .cstep { background: var(--surface-2); color: var(--muted); border: 1.5px solid rgba(35, 25, 66, 0.2); }
+[data-theme="petvault"] .cstep.done { background: #e3f9ec; color: var(--ok); border-color: var(--ok); }
+[data-theme="petvault"] .mustread { background: #fff6d8; border: var(--border); box-shadow: var(--pop-sm); }
+[data-theme="petvault"] .mustread h3 { color: var(--ink); }
+[data-theme="petvault"] .casebox { background: #fff; border: var(--border); }
+[data-theme="petvault"] .ai { background: #efe9ff; border: 2px solid var(--violet); }
+[data-theme="petvault"] .ev { background: var(--surface-2); border: 2px solid var(--line); }
+[data-theme="petvault"] .ev a { color: var(--violet-soft); }
+[data-theme="petvault"] .presence-toggle { background: #fff; color: var(--ink); border: var(--border); border-radius: 999px; }
+[data-theme="petvault"] .presence-toggle.on { color: var(--ok); border-color: var(--ink); }
+[data-theme="petvault"] .pres { background: var(--surface-2); }
+[data-theme="petvault"] .p-stats b { color: var(--ink); }
+[data-theme="petvault"] .plan.best { border-color: var(--ink); background: #fff8dc; }
+[data-theme="petvault"] .plan-tag { background: var(--violet); color: #fff; border: 2px solid var(--ink); }
+[data-theme="petvault"] .policy a { color: var(--violet-soft); }
+[data-theme="petvault"] .policy code { background: var(--surface-2); }
+[data-theme="petvault"] .policy th, [data-theme="petvault"] .policy td { border-color: var(--line); }
+
+/* ---------- Footer ---------- */
+[data-theme="petvault"] .footer { background: var(--ink); color: #d9d2f2; border-top: 0; margin-top: 40px; }
+[data-theme="petvault"] .footer .logo { color: #fff; }
+[data-theme="petvault"] .footer .logo b { color: #ffe066 !important; }
+[data-theme="petvault"] .footer p { color: #b9b0d9; }
+[data-theme="petvault"] .footer-links a { color: #d9d2f2; }
+[data-theme="petvault"] .footer-links a:hover { color: #ffe066; }
+
+@media (max-width: 900px) {
+  .pv-hero { grid-template-columns: 1fr; padding: 28px 20px 24px; }
+  .pv-stage { height: 240px; }
+  .pv-cats { grid-template-columns: repeat(3, 1fr); }
+  .pv-steps ol { grid-template-columns: 1fr; gap: 24px; }
+}
+@media (max-width: 480px) {
+  .pv-cats { gap: 10px; }
+  .pv-cat { padding: 12px 6px; font-size: 0.9rem; }
+  .pv-steps { padding: 24px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pv-blob, .pv-float, [data-theme="petvault"] .pv-stage .hero-card { animation: none; }
+}
+[data-theme="petvault"] .tab .n { background: var(--surface-2); color: var(--ink); }
+[data-theme="petvault"] .tab.on .n { background: #ffe066; color: var(--ink); }

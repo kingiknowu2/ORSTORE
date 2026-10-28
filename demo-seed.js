@@ -4,6 +4,7 @@
 const { PNG } = require('pngjs');
 
 function cover(r, g, b) {
+  if (process.env.STORE_THEME === 'petvault') [r, g, b] = [r, g, b].map((c) => c + (255 - c) * 0.45); // pastel covers for the light theme
   const p = new PNG({ width: 480, height: 360 });
   for (let y = 0; y < 360; y++) for (let x = 0; x < 480; x++) {
     const i = (y * 480 + x) * 4, stripe = ((x + y) >> 5) % 2 ? 1 : 0.85, fade = 1 - y / 720;
@@ -21,6 +22,9 @@ const ITEMS = [
   ['PixelForge', 'Jailbreak', 'Torpedo (Hyperchrome)', 'Torpedo with hyperchrome level 2.', 'Torpedo vehicle, hyperchrome L2', '12.00', [50, 50, 60]],
   ['NovaTrades', 'Jailbreak', '5M Cash', '5 million cash via trade.', '5,000,000 in-game cash', '3.99', [40, 140, 60]],
   ['PixelForge', 'Blox Fruits', 'Leopard Fruit', 'Physical Leopard fruit.', 'Leopard fruit (physical)', '15.00', [180, 140, 40]],
+  ['PixelForge', 'Pet Simulator 99', 'Titanic Blobfish', 'Titanic Blobfish, traded in-game.', 'Titanic Blobfish pet', '42.00', [70, 130, 200]],
+  ['PixelForge', 'Pet Simulator 99', 'Huge Rainbow Cat', 'Rainbow Huge Cat, fast trade.', 'Huge Rainbow Cat pet', '11.25', [200, 90, 170]],
+  ['NovaTrades', 'Pet Simulator 99', '50 Huge Machine Eggs', 'Bundle of 50 Huge Machine eggs.', '50 Huge Machine eggs', '8.99', [190, 150, 50]],
 ];
 
 async function seed(base, db) {
@@ -41,15 +45,17 @@ async function seed(base, db) {
     return (await call(who, `/api/orders/${co.order.id}/sync`, {})).order.id;
   };
   for (const u of ['NovaTrades', 'PixelForge', 'kai_buys', 'zoe_plays']) await call(u, '/api/signup', { username: u, password: 'demo-password' });
+  const { games } = await call('NovaTrades', '/api/config');
+  const items = ITEMS.filter((it) => games.includes(it[1])); // a single-game store only gets that game's items
   const ids = [];
-  for (const [seller, game, title, description, delivers, price, rgb] of ITEMS) {
+  for (const [seller, game, title, description, delivers, price, rgb] of items) {
     const f = await call(seller, '/api/files', Buffer.from('Demo delivery notes for ' + title), 'delivery-notes.txt');
     const r = await call(seller, '/api/listings', { game, title, description, delivers, compatibility: 'Roblox (PC, mobile, console)', licence: 'single_use',
       price, copies: 'unlimited', file_id: f.id, usable: true, owns_rights: true, buyer_info_label: 'Your Roblox username', images: [cover(...rgb)] });
     ids.push(r.id);
   }
   await call('NovaTrades', '/api/presence', { online: true });
-  for (const [who, i] of [['kai_buys', 0], ['zoe_plays', 2], ['zoe_plays', 3], ['kai_buys', 6]]) {
+  for (const [who, i] of [['kai_buys', 0], ['zoe_plays', 2], ['zoe_plays', 3], ['kai_buys', 6]].filter(([, i]) => i < ids.length)) {
     const oid = await buy(who, ids[i]);
     await call(who, `/api/orders/${oid}/messages`, { body: 'hey my user is ' + who + '_rbx' });
   }

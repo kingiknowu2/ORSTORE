@@ -13,3 +13,24 @@ services:
         value: "1"
       - key: ADMIN_USERS
         sync: false # set to the username you'll sign up with, to get the Admin area
+
+  # Second store: PetVault, Pet Simulator 99 items only, with its own look (public/themes/petvault). Separate site and database.
+  - type: web
+    name: petvault
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: STORE_NAME
+        value: PetVault
+      - key: STORE_GAMES
+        value: Pet Simulator 99
+      - key: STORE_THEME
+        value: petvault
+      - key: DEMO_SEED
+        value: "1"
+      - key: ADMIN_USERS
+        sync: false # set to the username you'll sign up with, to get the Admin area
