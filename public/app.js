@@ -62,8 +62,8 @@ function avatar(name, cls = '') {
 function art(game) {
   const h = hue(game);
   const initials = String(game).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
-  const bg = CFG.theme === 'petvault' // candy pastels for the light PetVault look
-    ? `radial-gradient(circle at 30% 25%,rgba(255,255,255,.55) 0 18%,transparent 19%),linear-gradient(160deg,hsl(${h} 90% 78%),hsl(${(h + 40) % 360} 85% 66%))`
+  const bg = CFG.theme === 'petvault' // soft, muted tones for the light PetVault look
+    ? `linear-gradient(160deg,hsl(${h} 35% 92%),hsl(${(h + 30) % 360} 30% 82%))`
     : `repeating-linear-gradient(135deg,rgba(255,255,255,.05) 0 14px,transparent 14px 28px),linear-gradient(160deg,hsl(${h} 42% 34%),hsl(${(h + 25) % 360} 45% 14%))`;
   return `<div class="art" style="background:${bg}"><span>${esc(initials)}</span></div>`;
 }
@@ -323,40 +323,44 @@ const card = (l, i) => `
         <div class="price">${money(l.price_cents)}</div></div></div>
   </a>`;
 
-// PetVault's home: a Pet Simulator 99 storefront with its own hero, category shortcuts and copy.
-const PET_CATEGORIES = [['🐾', 'Huges', 'huge'], ['👑', 'Titanics', 'titanic'], ['💎', 'Diamonds', 'diamonds'], ['🥚', 'Eggs', 'egg'], ['🌈', 'Rainbow', 'rainbow'], ['✨', 'Shiny', 'shiny']];
+// PetVault's home: a Pet Simulator 99 storefront with its own hero, featured panel, category shortcuts and copy.
+const PET_CATEGORIES = [['Huge pets', 'huge'], ['Titanics', 'titanic'], ['Diamonds', 'diamonds'], ['Eggs', 'egg'], ['Rainbow', 'rainbow'], ['Shiny', 'shiny']];
 function petHome(p) {
   return `
     <section class="pv-hero reveal">
       <div class="pv-hero-copy">
-        <span class="pv-tag">🐾 The ${esc(CFG.games[0] || 'pet')} marketplace</span>
-        <h1>Hatch your <span class="pv-hl">dream pets</span> today</h1>
-        <p class="lead">Huges, Titanics, diamonds and eggs from real traders. Your money stays safe in the vault until the pet lands in your inventory.</p>
+        <span class="eyebrow">${esc(CFG.games[0] || 'Pet')} marketplace</span>
+        <h1>Trade pets with confidence.</h1>
+        <p class="lead">Huges, Titanics, diamonds and eggs from verified traders. Payment is held in escrow until the trade is confirmed on both sides.</p>
         <form class="search pv-search" id="search">${icon.search}
           <input name="q" placeholder="Search Huge Cat, Titanic, 10B diamonds…" value="${esc(p.get('q') || '')}" autocomplete="off">
-          <button class="btn">Find pets</button></form>
-        <div class="pv-stats">
-          <div><b data-stat="live">0</b><span>pets &amp; items</span></div>
-          <div><b data-stat="sellers">0</b><span>traders</span></div>
-          <div><b data-stat="completed">0</b><span>trades done</span></div>
-        </div>
+          <button class="btn">Search</button></form>
+        <div class="pv-popular"><span>Popular:</span>${PET_CATEGORIES.slice(0, 4).map(([label, q]) => `<a href="#/?q=${encodeURIComponent(q)}">${esc(label)}</a>`).join('')}</div>
       </div>
-      <div class="pv-stage" aria-hidden="true"><div class="pv-blob"></div><div class="hero-art" id="hero-art"></div>
-        <span class="pv-float f1">🥚</span><span class="pv-float f2">💎</span><span class="pv-float f3">⭐</span></div>
+      <aside class="pv-featured">
+        <div class="pv-featured-head"><b>Featured listings</b><span class="pv-live"><i></i>Live</span></div>
+        <div class="hero-art" id="hero-art"></div>
+      </aside>
     </section>
-    <nav class="pv-cats" aria-label="Shop by type">${PET_CATEGORIES.map(([e, label, q], i) =>
-      `<a class="pv-cat reveal" style="--i:${i}" href="#/?q=${encodeURIComponent(q)}"><span>${e}</span>${esc(label)}</a>`).join('')}</nav>
+    <section class="pv-metrics reveal">
+      <div><b data-stat="live">0</b><span>Active listings</span></div>
+      <div><b data-stat="sellers">0</b><span>Verified sellers</span></div>
+      <div><b data-stat="completed">0</b><span>Completed trades</span></div>
+      <div><b>${CFG.hold_days} days</b><span>Buyer protection</span></div>
+    </section>
+    <nav class="pv-cats" aria-label="Browse by category"><span class="pv-cats-label">Browse</span>${PET_CATEGORIES.map(([label, q]) =>
+      `<a class="pv-cat" href="#/?q=${encodeURIComponent(q)}">${esc(label)}</a>`).join('')}</nav>
     <div id="feed"></div>
-    <div class="section-head"><div><span class="eyebrow">Fresh from the hatchery</span><h2 id="results-title">Newest pets</h2></div>
+    <div class="section-head"><div><span class="eyebrow">Marketplace</span><h2 id="results-title">Newest listings</h2></div>
       <div class="chips" id="chips"></div></div>
     <div class="grid" id="results">${skeletons(8)}</div>
     <section class="pv-steps">
-      <h2>How the vault keeps you safe</h2>
-      <ol>${[['🛒', 'Buy', 'Pay by card. Your money goes into the vault, not to the seller.'],
-             ['🤝', 'Trade', 'The seller trades the pet to your Roblox username and records the trade.'],
-             ['✅', 'Confirm', `Tick “received” and the seller gets paid. Something wrong? Open a case within ${CFG.hold_days} days.`]]
-        .map(([e, t, d], i) => `<li class="reveal" style="--i:${i}"><span class="pv-step-ic">${e}</span><b>${t}</b><p>${d}</p></li>`).join('')}</ol>
-      <p class="fine">Listing is free. Sellers pay a flat ${feePct()} only when a sale succeeds. Buyers never pay extra.</p>
+      <div class="pv-steps-head"><span class="eyebrow">Escrow protection</span><h2>How every trade is protected</h2></div>
+      <ol>${[[icon.lock, 'Pay into escrow', 'Your payment is held by ' + esc(CFG.name) + ', never sent straight to the seller.'],
+             [icon.chat, 'Seller delivers', 'The seller trades the pet to your Roblox username and uploads a recording of the trade.'],
+             [icon.check, 'Both sides confirm', `The seller is paid only after you confirm. If anything is wrong, a case opens within ${CFG.hold_days} days.`]]
+        .map(([ic, t, d], i) => `<li class="reveal" style="--i:${i}"><span class="pv-step-ic">${ic}</span><b>${t}</b><p>${d}</p></li>`).join('')}</ol>
+      <p class="fine">Listing is free. Sellers pay a flat ${feePct()} fee only when a sale completes. Buyers pay no fees.</p>
     </section>`;
 }
 
@@ -430,9 +434,12 @@ async function loadResults(first) {
   if (tiles && first) tiles.innerHTML = data.games.slice(0, 6).map((g, i) => `<a class="game-tile reveal" style="--i:${i}" href="${chipHref(g.game)}">${art(g.game)}
     <span class="gt-name">${esc(g.game)}</span><span class="gt-count">${g.count} item${g.count === 1 ? '' : 's'}</span></a>`).join('') || '<p class="muted">Games appear here once items are listed.</p>';
   const heroArt = $('#hero-art');
-  if (heroArt && first) heroArt.innerHTML = data.listings.slice(0, 3).map((l, i) => `<a class="hero-card hc-${i}" href="#/item/${l.id}">${cover(l)}
+  if (heroArt && first && CFG.theme === 'petvault') heroArt.innerHTML = data.listings.slice(0, 4).map((l) => `<a class="pv-feat" href="#/item/${l.id}">
+    <span class="pv-feat-th">${cover(l)}</span><span class="pv-feat-main"><b>${esc(l.title)}</b><small>${esc(l.seller)}</small></span>
+    <span class="pv-feat-price">${money(l.price_cents)}</span></a>`).join('') || '<p class="muted">Listings appear here once sellers add them.</p>';
+  else if (heroArt && first) heroArt.innerHTML = data.listings.slice(0, 3).map((l, i) => `<a class="hero-card hc-${i}" href="#/item/${l.id}">${cover(l)}
     <span class="hc-info"><b>${esc(l.title)}</b><span>${money(l.price_cents)}</span></span></a>`).join('');
-  $('#results-title').textContent = q || game ? `${data.listings.length} result${data.listings.length === 1 ? '' : 's'}` : CFG.theme === 'petvault' ? 'Newest pets' : 'Latest drops';
+  $('#results-title').textContent = q || game ? `${data.listings.length} result${data.listings.length === 1 ? '' : 's'}` : CFG.theme === 'petvault' ? 'Newest listings' : 'Latest drops';
   if (CFG.games.length === 1) $('#chips').innerHTML = q ? `<a class="chip" href="#/">Clear search ✕</a>` : ''; // one game: filtering by game means nothing
 
   results.innerHTML = data.listings.map(card).join('') || `

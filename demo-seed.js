@@ -4,7 +4,6 @@
 const { PNG } = require('pngjs');
 
 function cover(r, g, b) {
-  if (process.env.STORE_THEME === 'petvault') [r, g, b] = [r, g, b].map((c) => c + (255 - c) * 0.45); // pastel covers for the light theme
   const p = new PNG({ width: 480, height: 360 });
   for (let y = 0; y < 360; y++) for (let x = 0; x < 480; x++) {
     const i = (y * 480 + x) * 4, stripe = ((x + y) >> 5) % 2 ? 1 : 0.85, fade = 1 - y / 720;
