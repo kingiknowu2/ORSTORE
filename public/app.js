@@ -340,7 +340,6 @@ const tierTag = (title) => {
   return `<span class="tier tier-${t.id}${v ? ' v-' + v.id : ''}">${esc(t.label)}${v ? `<i>${esc(v.label)}</i>` : ''}</span>`;
 };
 function petHome(p) {
-  const ticks = Array.from({ length: 60 }, (_, i) => `<line x1="100" y1="${i % 5 ? 8 : 4}" x2="100" y2="${i % 5 ? 13 : 17}" transform="rotate(${i * 6} 100 100)"/>`).join('');
   return `
     <section class="pv-hero reveal">
       <div class="pv-hero-copy">
@@ -357,10 +356,7 @@ function petHome(p) {
           <div><dt>Protection</dt><dd>${CFG.hold_days}d</dd></div>
         </dl>
       </div>
-      <div class="pv-vault">
-        <svg class="pv-dial" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="96"/><g>${ticks}</g><circle class="pv-dial-inner" cx="100" cy="100" r="74"/></svg>
-        <div class="pv-pick" id="hero-art"></div>
-      </div>
+      <aside class="pv-spot" id="hero-art"></aside>
     </section>
     <section class="pv-tiers" aria-label="Browse by rarity">${PET_TIERS.map((t) =>
       `<a class="pv-tier" data-tier="${t.id}" href="#/?q=${encodeURIComponent(t.q)}"><span class="pv-tier-bar"></span><b>${esc(t.label)}</b><small data-tier-count="${t.id}">–</small></a>`).join('')}</section>
@@ -449,11 +445,13 @@ async function loadResults(first) {
     <span class="gt-name">${esc(g.game)}</span><span class="gt-count">${g.count} item${g.count === 1 ? '' : 's'}</span></a>`).join('') || '<p class="muted">Games appear here once items are listed.</p>';
   const heroArt = $('#hero-art');
   if (heroArt && first && CFG.theme === 'petvault') {
-    // The dial shows the most valuable listing; the rarity tiles count what's listed in each tier.
-    const top = [...data.listings].sort((a, b) => b.price_cents - a.price_cents)[0];
-    heroArt.innerHTML = top ? `<a class="pv-pick-card" href="#/item/${top.id}"><span class="pv-pick-label">Top of the vault</span>
-      <span class="pv-pick-th">${cover(top)}</span>${tierTag(top.title)}<b>${esc(top.title)}</b><span class="pv-pick-price">${money(top.price_cents)}</span></a>`
-      : '<p class="pv-pick-empty">The vault is empty. List the first pet.</p>';
+    // The spotlight shows the most valuable listing, then the next three; the rarity tiles count each tier.
+    const [top, ...rest] = [...data.listings].sort((x, y) => y.price_cents - x.price_cents);
+    heroArt.innerHTML = top ? `<span class="pv-spot-label">Most valuable in the vault</span>
+      <a class="pv-spot-main" href="#/item/${top.id}" data-tier="${petTier(top.title).id}"><span class="pv-spot-img">${cover(top)}${tierTag(top.title)}</span>
+        <span class="pv-spot-body"><span><b>${esc(top.title)}</b><small>${esc(top.seller)}</small></span><span class="pv-spot-price">${money(top.price_cents)}</span></span></a>
+      ${rest.slice(0, 3).map((l) => `<a class="pv-spot-row" href="#/item/${l.id}" data-tier="${petTier(l.title).id}"><i></i><b>${esc(l.title)}</b><span>${money(l.price_cents)}</span></a>`).join('')}`
+      : '<p class="pv-spot-empty">The vault is empty. List the first pet.</p>';
     if (!q) PET_TIERS.forEach((t) => { const el = $(`[data-tier-count="${t.id}"]`); if (el) el.textContent = `${data.listings.filter((l) => petTier(l.title).id === t.id).length} listed`; });
   }
   else if (heroArt && first) heroArt.innerHTML = data.listings.slice(0, 3).map((l, i) => `<a class="hero-card hc-${i}" href="#/item/${l.id}">${cover(l)}
